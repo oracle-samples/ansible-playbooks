@@ -1,6 +1,6 @@
-# Ansible Collections
+# Ansible Playbooks for Oracle Linux
 
-Ansible Collections is a collection of ansible playbooks/code examples that helps automating any kind of time consuming process or operation usually executed manually.
+This repository is a collection of ansible playbooks/code examples that helps automating any kind of time consuming process or operation usually executed manually.
 Code examples are mainly focused on automation for Oracle Products with the option to leverage those with Oracle Linux Automation Manager and Oracle Linux Automation Engine.
 
 # What is Oracle Linux Automation Manager/Engine ?
@@ -13,7 +13,7 @@ This repository will contain example ansible playbook code.
 
 ## Getting Started
 
-Clone this repository `git clone https://github.com/oracle-samples/ansible-collections.git`
+Clone this repository `git clone https://github.com/oracle-samples/ansible-playbooks.git`
 
 - [Check the getting started OLAM documentation](https://docs.oracle.com/en/operating-systems/oracle-linux-automation-manager/index.html).
 

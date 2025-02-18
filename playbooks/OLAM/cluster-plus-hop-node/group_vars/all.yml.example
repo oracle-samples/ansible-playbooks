@@ -10,19 +10,28 @@
 
 "user_default_password": oracle
 
-# Enter the name of a local ssh keypair located in the ~/.ssh directory. This key appends
-# to the non-opc user account's authorized_keys file.
+# Enter the password for postgress awx user
 
-"ssh_keyfile": id_rsa
+"awx_pguser_password": password
+
+# Enter the password for postgress awx user
+
+"olam_admin_password": admin
+
+# Enter the name of a local ssh keypair pub file located in the ~/.ssh directory. This key appends
+# to the non-opc user account's authorized_keys file. Replace <username> and <keypair> with
+# your user.
+
+"ssh_keyfile": /home/<username>/.ssh/<keypair>.pub
 
 # Set proxy if needed
 # Uncomment both the pip_proxy_env and proxy_env sections, and set the proxy host and port accordingly.
 
-#pip_proxy_env:
+pip_proxy_env:
 #  http_proxy: 'http://www.example.com:80
 #  https_proxy: 'https://www.example.com:80'
 
-#proxy_env:
+proxy_env:
 #  http_proxy: 'www.example.com:80'
 #  https_proxy: 'www.example.com:80'
 #  ftp_proxy: 'www.example.com:80'

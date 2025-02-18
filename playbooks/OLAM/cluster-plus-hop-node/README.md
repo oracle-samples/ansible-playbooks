@@ -1,4 +1,4 @@
-# Oracle Linux Automation Manager 2.0 Cluster
+# Oracle Linux Automation Manager 2.2 Cluster
 
 The playbook provides a clustered installation of [Oracle Linux Automation Manager](https://docs.oracle.com/en/operating-systems/oracle-linux-automation-manager/) using the details from an inventory file.
 
@@ -31,13 +31,13 @@ It configures the following seven nodes:
 1. Clone the repo:
 
     ```
-    git clone https://github.com/oracle-samples/ansible-collections.git ol-playbooks
+    git clone https://github.com/oracle-samples/ansible-playbooks.git ol-playbooks
     cd ol-playbooks/playbooks/OLAM/cluster-plus-hop-node
     cp group_vars/all.yml.example group_vars/all.yml
     cp inventory/hosts.ini.example inventory/hosts.ini
     ```
 
-1. Edit the group variables:
+1. Edit the group variables, minimum change passwords and ssh file:
 
     ```
     # Create Linux non-opc user account for installing Oracle Linux Automation Manager
@@ -47,58 +47,72 @@ It configures the following seven nodes:
     # Enter the non-hashed password for the non-opc user account.
     
     "user_default_password": oracle
-    
-    # Enter the name of a local ssh keypair located in the ~/.ssh directory. This key appends
-    # to the non-opc user account's authorized_keys file.
-    
-    "ssh_keyfile": id_rsa
+
+    # Enter the password for postgress awx user
+
+    "awx_pguser_password": password
+
+    # Enter the password for postgress awx user
+
+    "olam_admin_password": admin
+
+    # Enter the name of a local ssh keypair pub file located in the ~/.ssh directory. This key appends
+    # to the non-opc user account's authorized_keys file. Replace <username> and <keypair> with
+    # your user.
+
+    "ssh_keyfile": /home/<username>/.ssh/<keypair>.pub
     ```
 
     This file also contains a variable for setting a proxy if required to reach the internet from the Oracle Linux Automation Manager nodes.
 
-1. Edit the inventory:
+1. Edit the inventory and customize hostnames:
 
     ```
     [control_nodes]
-    control-node01
-    control-node02
-    
+    olam-control01
+    olam-control02
+
     [control_nodes:vars]
     node_type=control
     peers=local_execution_group
 
     [execution_nodes]
-    execution-node01
-    execution-node02
-    execution-remote-node01
-    hop-node01
+    olam-execution01
+    olam-execution02
+    olam-remote-execution01
+    olam-hop01
 
     [local_execution_group]
-    execution-node01
-    execution-node02
+    olam-execution01
+    olam-execution02
+
+    [local_execution_group:vars]
+    node_type=execution
 
     [hop]
-    hop-node01
+    olam-hop01
 
     [hop:vars]
     peers=control_nodes
 
     [remote_execution_group]
-    execution-remote-node01
+    olam-remote-execution01
 
     [remote_execution_group:vars]
     peers=hop
 
     [db_nodes]
-    db-remote
+    olam-db
 
     [all:vars]
     ansible_user=opc
-    ansible_ssh_private_key_file=~/.ssh/id_rsa
+    ansible_ssh_private_key_file=~/.ssh/oci-olam
     ansible_python_interpreter=/usr/bin/python3
     ```    
     
     The `all:vars` group variables define the user, key file, and python version used when connecting to the different nodes using SSH.
+
+    A second `host.ini.example` is provided in the inventory directory for a four node cluster without hop-node and remote exexution node.
 
 1. Test SSH connectivity to all the hosts listed in the inventory:
 

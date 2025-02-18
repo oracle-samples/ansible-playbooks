@@ -6,3 +6,4 @@ collections:
   - community.general
   - community.postgresql
   - community.crypto
+  - containers.podman

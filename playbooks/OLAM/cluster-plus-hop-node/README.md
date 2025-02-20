@@ -54,7 +54,7 @@ It configures the following seven nodes:
 
     # Enter the password for postgress awx user
 
-    "olam_admin_password": admin
+    "olam_admin_password": CHANGE_ME
 
     # Enter the name of a local ssh keypair pub file located in the ~/.ssh directory. This key appends
     # to the non-opc user account's authorized_keys file. Replace <username> and <keypair> with

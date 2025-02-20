@@ -47,7 +47,9 @@
      - name: Check for inhibitors
        ansible.builtin.set_fact:
          upgrade_inhibited: true
-       when: "'inhibitor' in item.flags"
+       when:
+         - "'flags' in item.keys()"
+         - "'inhibitor' in item.flags"
        loop: "{{ leapp_report_json.entries }}"
        
      - name: Print lines 

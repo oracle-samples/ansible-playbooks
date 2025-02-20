@@ -1,6 +1,6 @@
 # Ansible Playbooks for Oracle Linux
 
-This repository is a collection of ansible playbooks/code examples that helps automating any kind of time consuming process or operation usually executed manually.
+This repository is a collection of Ansible playbooks/code examples that helps automating any kind of time consuming process or operation usually executed manually.
 Code examples are mainly focused on automation for Oracle Products with the option to leverage those with Oracle Linux Automation Manager and Oracle Linux Automation Engine.
 
 # What is Oracle Linux Automation Manager/Engine ?

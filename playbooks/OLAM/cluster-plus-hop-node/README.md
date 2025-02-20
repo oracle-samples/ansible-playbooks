@@ -48,7 +48,7 @@ It configures the following seven nodes:
     
     "user_default_password": oracle
 
-    # Enter the password for postgress awx user
+    # Enter the password for PostgreSQL awx user
 
     "awx_pguser_password": CHANGE_ME
 

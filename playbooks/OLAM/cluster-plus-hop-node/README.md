@@ -46,7 +46,7 @@ It configures the following seven nodes:
     
     # Enter the non-hashed password for the non-opc user account.
     
-    "user_default_password": oracle
+    "user_default_password": CHANGE_ME
 
     # Enter the password for PostgreSQL awx user
 

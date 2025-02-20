@@ -50,7 +50,7 @@ It configures the following seven nodes:
 
     # Enter the password for postgress awx user
 
-    "awx_pguser_password": password
+    "awx_pguser_password": CHANGE_ME
 
     # Enter the password for postgress awx user
 

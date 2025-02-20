@@ -1,0 +1,30 @@
+---
+#
+# Oracle Linux Automation Manager
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to list object storage buckets within OCI
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+#
+# This playbook uses the following additional variables which should be configured at run time for the template, these are examples values used
+# in the lab:
+# instance_compartment: ocid1.compartment.oc1..aaaaaaaaber7qua64uz7siuwf3eyt62wct3kgk6nvvanbxfm7gku5ouxh3ga
+
+- name : List summary of existing buckets in OCI object storage
+  collections:
+    - oracle.oci
+  connection: local
+  hosts: localhost
+  tasks:
+    - name: List bucket facts
+      oci_object_storage_bucket_facts:
+         namespace_name: ovm
+         compartment_id: "{{ instance_compartment }}"
+      register: result
+    - name: Dump result
+      debug: 
+        msg: '{{result}}'

@@ -24,7 +24,7 @@ request, please [review our contribution guide](./CONTRIBUTING.md).
 
 ## Help
 
-- Project Owner: Simon Coter ([@scoter-oracle](https://github.com/scoter-oracle))
+- Project Owner: Avi Miller ([@Djelibeybi](https://github.com/Djelibeybi))
 - Project Admin: Monica S ([@Monicashivakumar](https://github.com/Monicashivakumar))
 
 ## Security

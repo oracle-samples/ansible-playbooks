@@ -3,7 +3,7 @@
 This repository is a collection of Ansible playbooks/code examples that helps automating any kind of time consuming process or operation usually executed manually.
 Code examples are mainly focused on automation for Oracle products with the option to leverage those with Oracle Linux Automation Manager and Oracle Linux Automation Engine.
 
-# What is Oracle Linux Automation Manager/Engine ?
+# What is Oracle Linux Automation Manager/Engine?
 
 Oracle Linux Automation Manager and Oracle Linux Automation Engine are the latest additions to the Oracle Linux operating environment.
 Together, these new capabilities provide a cost effective, powerful, web-based automation engine with reporting, credentialed role-based access control, work flow automation, and job scheduling framework for Oracle Linux customers that need modern provisioning, deployment, configuration management, and task automation.

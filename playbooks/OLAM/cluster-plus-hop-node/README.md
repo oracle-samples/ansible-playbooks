@@ -37,7 +37,7 @@ It configures the following seven nodes:
     cp inventory/hosts.ini.example inventory/hosts.ini
     ```
 
-1. Edit the group variables, minimum change passwords and ssh file:
+1. Edit the group variables, change the default passwords and replace the sample ssh key files:
 
     ```
     # Create Linux non-opc user account for installing Oracle Linux Automation Manager

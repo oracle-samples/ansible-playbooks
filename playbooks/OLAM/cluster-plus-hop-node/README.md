@@ -52,7 +52,7 @@ It configures the following seven nodes:
 
     "awx_pguser_password": CHANGE_ME
 
-    # Enter the password for postgress awx user
+    # Enter the password for PostgreSQL awx user
 
     "olam_admin_password": CHANGE_ME
 

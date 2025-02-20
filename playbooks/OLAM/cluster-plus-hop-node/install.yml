@@ -13,11 +13,12 @@
       append: yes
       update_password: on_create
 
-  - name: set authorized key for user using local pubilc key file
-    authorized_key:
+  - name: set authorized key for user using local public key file
+    ansible.posix.authorized_key:
       user: "{{ username }}"
       state: present
-      key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/{{ ssh_keyfile  }}.pub') }}"
+      key: "{{ lookup('file', '{{ ssh_keyfile }}') }}"
+
 
   - name: set user with passwordless sudo access
     lineinfile:
@@ -71,13 +72,13 @@
       mode: '0600'
     when: ( inventory_hostname != groups["control_nodes"][0] )
 
-  - name: set authorized key for passwordless ssh using local pubilc key file
+  - name: set authorized key for passwordless ssh using local public key file
     authorized_key:
       user: "{{ username }}"
       state: present
       key: "{{ lookup('file', 'buffer/id_olam_rsa.pub') }}"
 
-  - name: set authorized key for passwordless ssh using local pubilc key file
+  - name: set authorized key for passwordless ssh using local public key file
     authorized_key:
       user: opc
       state: present
@@ -195,7 +196,7 @@
     - name: create awx postgresql user
       community.postgresql.postgresql_user:
         name: awx
-        password: password
+        password: "{{ awx_pguser_password }}"
         role_attr_flags: NOSUPERUSER
       become_user: postgres
 
@@ -231,7 +232,7 @@
         name: postgresql
         state: restarted
 
-# Configure OLAM 2.0 hosts
+# Configure OLAM 2.2 hosts
 
 - hosts: control_nodes,execution_nodes
   collections:
@@ -245,7 +246,7 @@
 
     - name: install Oracle Linux Automation Manager repository
       dnf:
-        name: oraclelinux-automation-manager-release-el8
+        name: oraclelinux-automation-manager-release-el8-2.2
         state: present
       environment: "{{ proxy_env }}"
 
@@ -257,10 +258,18 @@
         value: "0"
         mode: 0644
 
-    - name: enable Oracle Linux Automation Manager 2.0 repository
+    - name: disable Oracle Linux Automation Manager 2.0 repository
       ini_file:
         path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
         section: ol8_automation2
+        option: enabled
+        value: "0"
+        mode: 0644
+
+    - name: enable Oracle Linux Automation Manager 2.2 repository
+      ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
+        section: ol8_automation2.2
         option: enabled
         value: "1"
         mode: 0644
@@ -348,7 +357,7 @@
       loop:
         - 27199/tcp
 
-- hosts: control_nodes,execution_nodes,db_nodes
+- hosts: control_nodes,execution_nodes
   collections:
     - ansible.posix
     - community.general
@@ -360,8 +369,7 @@
 
     - name: get db ipaddress
       set_fact:
-        db_node_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
-      when: "'db_nodes' in group_names"
+        db_node_ip: "{{ hostvars[groups['db_nodes'][0]]['ansible_default_ipv4']['address'] }}"
 
     - name: configure DATABASE settings
       copy:
@@ -373,15 +381,14 @@
                   'ENGINE': 'awx.main.db.profiled_pg',
                   'NAME': 'awx',
                   'USER': 'awx',
-                  'PASSWORD': 'password',
-                  'HOST': '{{ hostvars['db-remote']['db_node_ip'] }}',
+                  'PASSWORD': '{{ awx_pguser_password }}',
+                  'HOST': '{{ db_node_ip }}',
                   'PORT': '5432',
               }
           }
         owner: awx
         group: awx
         mode: '0640'
-      when: "'db_nodes' not in group_names"
 
     - name: check if awx setup
       stat:
@@ -408,8 +415,8 @@
           expect:
             command: "awx-manage createsuperuser --username admin --email admin@example.com"
             responses:
-              'Password:': admin
-              'Password \(again\):': admin
+              'Password:': "{{ olam_admin_password }}"
+              'Password \(again\):': "{{ olam_admin_password }}"
           register: awx_password
           become_user: awx
           ignore_errors: yes
@@ -452,6 +459,15 @@
         owner: root
         group: root
         mode: '0644'
+
+    - name: change work type to ansible-runner for execution node
+      ansible.builtin.replace:
+        path: /etc/receptor/receptor.conf
+        regexp: 'worktype: local'
+        replace: 'worktype: ansible-runner'
+      when:
+        - inventory_hostname in groups.execution_nodes
+        - inventory_hostname not in groups.hop
 
     - name: add tcp-peers if present
       ansible.builtin.lineinfile:
@@ -541,27 +557,6 @@
       debug:
         msg: "{{ awx_provision_script }}"
 
-
-#     - name: run awx-manage provision
-#       shell: |
-#         awx-manage provision_instance --hostname={{ hostvars[item]['ansible_default_ipv4']['address'] }} --node_type={{ "{% if item in groups['control_nodes'] %}control{% elif 'hop' in group_names %}hop{% else %}execution{% endif %}" }}
-#         awx-manage register_default_execution_environments
-#         awx-manage register_queue --queuename={{ "{% if 'control_nodes' in group_names %}controlplane{% else %}execution{% endif %}" }} --hostnames={{ hostvars[item]['ansible_default_ipv4']['address'] }}
-#         awx-manage create_preload_data
-#         touch /var/lib/awx/.awx-provisioned
-#       args:
-#         executable: /bin/bash
-#       become_user: awx
-#       register: awx_register
-#       when: not awx_provision.stat.exists
-#       with_items:
-#         - "{{ groups['control_nodes'] }}"
-#         - "{{ groups['execution_nodes'] }}"
-#       changed_when: awx_register is not search('already exists')
-
-#     - name: print awx_register
-#       debug:
-#         msg: "{{awx_register}}"
 
 - hosts: control_nodes,execution_nodes
   become: yes

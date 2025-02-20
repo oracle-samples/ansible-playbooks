@@ -12,7 +12,7 @@
     filename: /var/run/receptor/receptor.sock
  
 - work-command:
-    worktype: {% if 'control_nodes' or 'hop' in group_names %}local{% else %}ansible-runner{% endif %}{{''}}
+    worktype: local
     command: /var/lib/ol-automation-manager/venv/awx/bin/ansible-runner
     params: worker
     allowruntimeparams: true

@@ -39,8 +39,6 @@ peers=local_execution_group
 [execution_nodes]
 olam-execution01
 olam-execution02
-olam-remote-execution01
-olam-hop01
 
 [local_execution_group]
 olam-execution01
@@ -50,16 +48,12 @@ olam-execution02
 node_type=execution
 
 [hop]
-olam-hop01
 
 [hop:vars]
-peers=control_nodes
 
 [remote_execution_group]
-olam-remote-execution01
 
 [remote_execution_group:vars]
-peers=hop
 
 [db_nodes]
 olam-db

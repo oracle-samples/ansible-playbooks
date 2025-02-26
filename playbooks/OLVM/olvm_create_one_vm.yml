@@ -1,0 +1,61 @@
+---
+
+# Configure default_vars.yml to setup default infrastrcuture variables
+#
+# Define following variables as extra-vars:
+#   --extra-vars "vm_name=oltest"
+#   --extra-vars "vm_ip_address=192.168.1.100"
+
+- hosts: olvm
+  become: yes
+  become_method: sudo
+  gather_facts: yes
+  
+  vars_files:
+    - default_vars.yml
+    
+  tasks:
+
+    - name: Login to OLVM manager
+      ovirt_auth:
+        url: "{{ lookup('env', 'OVIRT_URL') }}"
+        username: "{{ lookup('env', 'OVIRT_USERNAME') }}"
+        password: "{{ lookup('env', 'OVIRT_PASSWORD') }}"
+        ca_file: "{{ olvm_cafile | default('/etc/pki/ovirt-engine/ca.pem') }}"
+        insecure: "{{ olvm_insecure | default(true) }}"
+      tags:
+        - always
+
+    - name: Create and run VM from template
+      ovirt_vm:
+        auth: "{{ ovirt_auth }}"
+        name: "{{ vm_name }}"
+        template: "{{ olvm_template }}"
+        cluster: "{{ olvm_cluster }}"
+        memory: "{{ vm_ram }}"
+        cpu_sockets: "{{ vm_cpu }}"
+        high_availability: true
+        state: running
+        wait: yes
+        cloud_init:
+          host_name: "{{ vm_name + '.' + vm_dns_domain }}"
+          root_password: "{{ vm_root_passwd }}"
+          user_name: "{{ vm_user }}"
+          authorized_ssh_keys: "{{ vm_user_sshpubkey }}"
+          dns_servers: "{{ vm_dns }}"
+          dns_search: "{{ vm_dns_domain }}"
+          nic_name: "{{ vm_nicname | default('eth0') }}"
+          nic_boot_protocol: static
+          nic_ip_address: "{{ vm_ip_address }}"
+          nic_gateway: "{{ vm_gateway }}"
+          nic_netmask: "{{ vm_netmask }}"
+          timezone: "{{ vm_timezone }}"
+          custom_script: |
+            runcmd:
+              - hostnamectl set-hostname {{ vm_name + '.' + vm_dns_domain }}
+              - yum -y remove cloud-init
+
+    - name: Cleanup OLVM auth token
+      ovirt_auth:
+        ovirt_auth: "{{ ovirt_auth }}"
+        state: absent

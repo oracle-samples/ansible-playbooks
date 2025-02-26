@@ -1,0 +1,28 @@
+---
+
+# Configure default_vars.yml to setup default infrastrcuture variables
+#
+# Define following variables as extra-vars, for example:
+#   --extra-vars "vm_name=oltest"
+
+- hosts: olvm
+  become: yes
+  
+  vars_files:
+    - default_vars.yml
+
+  tasks:
+    - name: List OLVM VM's {{ vm_name }} by Cluster {{ olvm_cluster }}
+      ovirt_vm_info:
+        auth:
+          url: "{{ lookup('env', 'OVIRT_URL') }}"
+          username: "{{ lookup('env', 'OVIRT_USERNAME') }}"
+          password: "{{ lookup('env', 'OVIRT_PASSWORD') }}"
+          ca_file: "{{ olvm_cafile | default(omit) }}"
+          insecure: "{{ olvm_insecure | default(true) }}"
+        pattern: name="{{ vm_name }}" and cluster="{{ olvm_cluster }}"
+      register: result
+
+    - name: Print out {{ vm_name }} VM information
+      debug:
+        msg: "{{ result.ovirt_vms }}"

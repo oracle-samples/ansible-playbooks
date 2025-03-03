@@ -41,7 +41,7 @@ For example, the playbooks can be used like this (adjust variables to your infra
 
 Note 1: using the OLVM server FQDN (in this example olvm-engine.demo.local), appended with a comma, is a quick-way to not use a inventory file.
 
-Note 2: as it includes clear-text password, for better security you may want to encrypt the ``default_vars.yml`` file with the ansible-vault command. When running the playbook, ansible asks for a secret to decrypt the yml-file.
+Note 2: as it includes clear-text password, for better security you may want to encrypt the ``default_vars.yml`` file with the `ansible-vault` command. When running the playbook, Ansible asks for a secret to decrypt the YAML file.
 
     $ ansible-vault encrypt default_vars.yml
     $ ansible-playbook -i olvm-engine.demo.local, -u opc --key-file ~/.ssh/id_rsa \

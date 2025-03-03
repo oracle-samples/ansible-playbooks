@@ -51,7 +51,7 @@ Note 2: as it includes clear-text password, for better security you may want to 
 ### Oracle Linux Automation Manager
 
 #### Project:
-In Oracle Linux Automation Manager you can directly import the playbook repository from Github as Project. The top-level directory of the repository contains the requirements file to download the ovir.ovirt ansible collection.
+In Oracle Linux Automation Manager you can directly import the playbook repository from GitHub as project. The top-level directory of the repository contains the requirements file to download the `ovirt.ovirt` ansible collection.
 
 #### Inventory:
 Create an inventory and add one host with the details of your OLVM server, this is the target host were you run the playbook. Make sure you have a Machine credential setup for this host so that ansible can SSH to it (run the ping Module for this host). For the VMs you want to create add an  inventory group ``[instances]`` and add the VM names including hostvars for ``vm_name`` and ``vm_ip_address``.

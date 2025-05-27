@@ -1,0 +1,60 @@
+# Copyright (c) 2025 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Auditd is a userspace system daemon running in the background, generating logs about activities performed on Oracle Linux. This playbook 
+# check if auditd is installed, running and general administartion commands
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+---
+- name: Auditd Admin Playbook
+  hosts: all
+  become: true
+  tasks:
+
+    - name: Ensure auditd is installed
+      package:
+        name: audit
+        state: present
+
+    - name: Ensure auditd is started
+      service:
+        name: auditd
+        state: started
+      become: true
+
+    - name: Check current audit rules
+      command: auditctl -l
+      register: audit_rules_output
+      changed_when: false
+
+    - name: Display audit rules
+      debug:
+        msg: "{{ audit_rules_output.stdout_lines }}"
+      
+    - name: Check the status of the audit system
+      command: auditctl -s 
+      register: auditctl_status_output
+      changed_when: false
+
+    - name: Display audit status
+      debug:
+        msg: "{{ auditctl_status_output.stdout_lines }}"
+
+    - name: Searching failed user logins
+      command: ausearch -m USER_LOGIN -sv no
+      register: ausearch_status_output
+      changed_when: false
+
+    - name: Display failed logins if any
+      debug:
+        msg: "{{ ausearch_status_output.stdout_lines }}"
+  
+    - name: Displaying report
+      command: aureport --summary
+      register: aureport_output
+      changed_when: false
+
+    - name: Displaying report
+      debug:
+        msg: "{{ aureport_output.stdout_lines }}"

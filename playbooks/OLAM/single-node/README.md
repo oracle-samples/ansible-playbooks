@@ -8,6 +8,8 @@ It configures a single node with the following roles:
 - control plane
 - execution
 
+Playbooks are copied from earlier work in [linux-virt-labs Github repository](https://github.com/oracle-devrel/linux-virt-labs) and adjusted for a generic installation..
+
 ## Quickstart
 
 ### Assumptions
@@ -41,11 +43,11 @@ It configures a single node with the following roles:
     ```
     # Enter the password for postgress awx user
 
-    "awx_pguser_password": password
+    "awx_pguser_password": CHANGEME
 
     # Enter the password for OLAM admin user
 
-    "olam_admin_password": admin
+    "olam_admin_password": CHANGEME
 
     # NOTE: use these passwords for demo purposes only, use other ansible features to
     # protect your passwords such as using ansible-vault to encrypt passwords.
@@ -56,7 +58,7 @@ It configures a single node with the following roles:
 1. Edit the inventory:
 
     ```
-    [control_node]
+    [control]
     my_olam_node
     
     [all:vars]
@@ -83,7 +85,7 @@ It configures a single node with the following roles:
 
     ```
 
-    ansible-playbook -i inventory/hosts.ini install.yml
+    ansible-playbook -i inventory/hosts.ini deploy_olam_single.yml
     ```
 
 ## Resources

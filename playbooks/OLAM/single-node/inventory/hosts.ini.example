@@ -1,22 +1,18 @@
-#
-# Oracle Linux Automation Manager
-#
-# Copyright (c) 2022 Oracle and/or its affiliates.
-# Licensed under the Universal Permissive License v 1.0 as shown at
-# https://oss.oracle.com/licenses/upl.
-#
-# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+## Copyright (c) 2024, 2025 Oracle and/or its affiliates.
+# This software is made available to you under the terms of the Universal Permissive License (UPL), Version 1.0.
+# The Universal Permissive License (UPL), Version 1.0 (see COPYING or https://oss.oracle.com/licenses/upl)
+# See LICENSE.TXT for details.
 #
 # Description:
 # Inventory file for the deployment of an Oracle Linux Automation
-# Manager 2.0 hybrid node environment (single node).
+# Manager 2.3 hybrid node environment (single node).
 #
-# control_node - node to run control, ececution and db
+# control - node to run control, ececution and db
 #
 # The "all" group_vars include the user and OpenSSH keypair used to connect to each node and the
 # specific python version used once connected.
 #
-[control_node]
+[control]
 my_olam_node
 
 [all:vars]

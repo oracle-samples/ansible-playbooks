@@ -1,0 +1,420 @@
+---
+# Copyright (c) 2024, 2025 Oracle and/or its affiliates.
+# This software is made available to you under the terms of the Universal Permissive License (UPL), Version 1.0.
+# The Universal Permissive License (UPL), Version 1.0 (see COPYING or https://oss.oracle.com/licenses/upl)
+# See LICENSE.TXT for details.
+
+- name: Install a single node OLAM server
+  hosts: control
+  vars:
+    control_node_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  become: true
+
+  tasks:
+
+    - name: Install Oracle EPEL repository (ol8)
+      ansible.builtin.dnf:
+        name: oracle-epel-release-el8
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Install Oracle EPEL repository (ol9)
+      ansible.builtin.dnf:
+        name: oracle-epel-release-el9
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Install version lock plugin (ol8)
+      ansible.builtin.dnf:
+        name: python3-dnf-plugin-versionlock
+        enablerepo: ol8_developer_EPEL
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Install version lock plugin (ol9)
+      ansible.builtin.dnf:
+        name: python3-dnf-plugin-versionlock
+        enablerepo: ol9_developer_EPEL
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Version lock python3-click (ol8)
+      community.general.yum_versionlock:
+        state: present
+        name: python3-click
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Install additional packages for ansible (ol8)
+      ansible.builtin.dnf:
+        name:
+          - python3-psycopg2
+          - python3-pyOpenSSL
+          - python3-pip
+        enablerepo: ol8_developer_EPEL
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+    
+    - name: Install additional packages for ansible (ol9)
+      ansible.builtin.dnf:
+        name:
+          - python3-psycopg2
+          - python3-pyOpenSSL
+          - python3-pip
+        enablerepo: ol9_developer_EPEL
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Install pexpect using pip
+      ansible.builtin.pip:
+        name: pexpect
+
+    # Install database
+
+    - name: Enable the PostgreSQL 16 module stream
+      ansible.builtin.copy:
+        dest: /etc/dnf/modules.d/postgresql.module
+        content: |
+          [postgresql]
+          name=postgresql
+          stream=16
+          profiles=
+          state=enabled
+        mode: '0644'
+
+    - name: Install the database
+      ansible.builtin.dnf:
+        name: postgresql-server
+        state: present
+      retries: 5
+      delay: 10
+
+    - name: Ensure postgresql data directory exists
+      ansible.builtin.file:
+        path: "/var/lib/pgsql/data"
+        owner: "postgres"
+        group: "postgres"
+        state: directory
+        mode: '0700'
+
+    # Handle the ol-automation-manager-DB-init.sh script
+
+    - name: Check if postgresql is initialized
+      ansible.builtin.stat:
+        path: "/var/lib/pgsql/data/PG_VERSION"
+      register: pgdata_dir_version
+
+    - name: Initialize postgresql database
+      ansible.builtin.command: "postgresql-setup --initdb"
+      when: not pgdata_dir_version.stat.exists
+      become: true
+      become_user: postgres
+      register: dbsetup_result
+      changed_when: dbsetup_result.rc == 0
+
+    - name: Change database password storage encryption
+      ansible.builtin.replace:
+        path: /var/lib/pgsql/data/postgresql.conf
+        regexp: '^#password_encryption.*'
+        replace: 'password_encryption = scram-sha-256'
+
+    - name: Enable and start postgresql.service
+      ansible.builtin.systemd:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Create awx postgresql user
+      community.postgresql.postgresql_user:
+        name: awx
+        password: "{{ awx_pguser_password }}"
+        role_attr_flags: NOSUPERUSER
+      become: true
+      become_user: postgres
+
+    - name: Create awx postgresql db
+      community.postgresql.postgresql_db:
+        name: awx
+        owner: awx
+      become: true
+      become_user: postgres
+
+    - name: Update host-based authentication
+      ansible.builtin.lineinfile:
+        path: /var/lib/pgsql/data/pg_hba.conf
+        line: "host  all  all 0.0.0.0/0 scram-sha-256"
+
+    - name: Set the database listening address
+      ansible.builtin.lineinfile:
+        path: /var/lib/pgsql/data/postgresql.conf
+        insertbefore: '^#port = 5432'
+        line: "listen_addresses = '{{ control_node_ip }}'"
+
+    - name: Restart the database
+      ansible.builtin.systemd:
+        name: postgresql
+        state: restarted
+
+    # Install Single-Host OLAM v2
+
+    - name: Install Oracle Linux Automation Manager repository (ol8)
+      ansible.builtin.dnf:
+        name: oraclelinux-automation-manager-release-el8
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Disable Oracle Linux Automation Manager 1.0 repository (ol8)
+      community.general.ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
+        section: ol8_automation
+        option: enabled
+        value: "0"
+        mode: '0644'
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Disable Oracle Linux Automation Manager 2.0 repository (ol8)
+      community.general.ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
+        section: ol8_automation2
+        option: enabled
+        value: "0"
+        mode: '0644'
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Disable Oracle Linux Automation Manager 2.2 repository (ol8)
+      community.general.ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
+        section: ol8_automation2.2
+        option: enabled
+        value: "0"
+        mode: '0644'
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Enable Oracle Linux Automation Manager 2.3 repository (ol8)
+      community.general.ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol8.repo"
+        section: ol8_automation2.3
+        option: enabled
+        value: "1"
+        mode: '0644'
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Install Oracle Linux Automation Manager repository (ol9)
+      ansible.builtin.dnf:
+        name: oraclelinux-automation-manager-release-el9
+        state: present
+      retries: 5
+      delay: 10
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Enable Oracle Linux Automation Manager 2.3 repository (ol9)
+      community.general.ini_file:
+        path: "/etc/yum.repos.d/oraclelinux-automation-manager-ol9.repo"
+        section: ol9_automation2.3
+        option: enabled
+        value: "1"
+        mode: '0644'
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Install Oracle Linux Automation Manager
+      ansible.builtin.dnf:
+        name: ol-automation-manager
+        state: present
+      retries: 5
+      delay: 10
+
+    - name: Edit unixsocket in /etc/redis.conf (ol8)
+      ansible.builtin.lineinfile:
+        path: /etc/redis.conf
+        regexp: '^unixsocket '
+        insertafter: '^# unixsocketperm '
+        line: unixsocket /var/run/redis/redis.sock
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'  
+
+    - name: Edit unixsocketperm in /etc/redis.conf (ol8)
+      ansible.builtin.lineinfile:
+        path: /etc/redis.conf
+        regexp: '^unixsocketperm '
+        insertafter: '^unixsocket '
+        line: unixsocketperm 775
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Edit unixsocket in /etc/redis/redis.conf (ol9)
+      ansible.builtin.lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: '^unixsocket '
+        insertafter: '^# unixsocketperm '
+        line: unixsocket /var/run/redis/redis.sock
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'  
+
+    - name: Edit unixsocketperm in /etc/redis/redis.conf (ol9)
+      ansible.builtin.lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: '^unixsocketperm '
+        insertafter: '^unixsocket '
+        line: unixsocketperm 775
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Configure CLUSTER_HOST_ID setting
+      ansible.builtin.copy:
+        dest: /etc/tower/conf.d/olam.py
+        content: |
+          CLUSTER_HOST_ID = "{{ control_node_ip }}"
+        owner: awx
+        group: awx
+        mode: '0640'
+
+    - name: Configure DATABASE settings
+      ansible.builtin.copy:
+        dest: /etc/tower/conf.d/db.py
+        content: |
+          DATABASES = {
+              'default': {
+                  'ATOMIC_REQUESTS': True,
+                  'ENGINE': 'awx.main.db.profiled_pg',
+                  'NAME': 'awx',
+                  'USER': 'awx',
+                  'PASSWORD': '{{ awx_pguser_password }}',
+                  'HOST': '{{ control_node_ip }}',
+                  'PORT': '5432',
+              }
+          }
+        owner: awx
+        group: awx
+        mode: '0640'
+
+    - name: Provision olam ansible container environment (ol8) # noqa: syntax-check[unknown-module]
+      containers.podman.podman_image:
+        name: container-registry.oracle.com/oracle_linux_automation_manager/olam-ee
+        tag: 2.3-ol8
+      become: true
+      become_user: awx
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+    - name: Provision olam ansible container environment (ol9) # noqa: syntax-check[unknown-module]
+      containers.podman.podman_image:
+        name: container-registry.oracle.com/oracle_linux_automation_manager/olam-ee
+        tag: 2.3-ol9
+      become: true
+      become_user: awx
+      when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '9'
+
+    - name: Check if awx provisioned
+      ansible.builtin.stat:
+        path: /var/lib/awx/.awx-provisioned
+      register: awx_provision
+
+    - name: Run awx-manage
+      ansible.builtin.shell: |
+        awx-manage migrate
+        awx-manage provision_instance --hostname={{ control_node_ip }} --node_type=hybrid
+        awx-manage register_default_execution_environments
+        awx-manage register_queue --queuename=default --hostnames={{ control_node_ip }}
+        awx-manage register_queue --queuename=controlplane --hostnames={{ control_node_ip }}
+        awx-manage create_preload_data
+        touch /var/lib/awx/.awx-provisioned
+      args:
+        executable: /bin/bash
+      become: true
+      become_user: awx
+      register: awx_migrate
+      when: not awx_provision.stat.exists
+      changed_when: awx_migrate is not search('already exists')
+
+    - name: Set awx password
+      ansible.builtin.expect:
+        command: "awx-manage createsuperuser --username admin --email admin@example.com"
+        responses:
+          'Password:': "{{ olam_admin_password }}"
+          'Password \(again\):': "{{ olam_admin_password }}"
+      register: awx_password
+      become: true
+      become_user: awx
+      ignore_errors: true
+      changed_when: awx_password.stdout is not search('is already taken')
+
+    - name: Generate an OpenSSL private key with a different size (2048 bits)
+      community.crypto.openssl_privatekey:
+        path: /etc/tower/tower.key
+        size: 2048
+
+    - name: Generate an OpenSSL Certificate Signing Request
+      community.crypto.openssl_csr:
+        path: /etc/tower/tower.csr
+        privatekey_path: /etc/tower/tower.key
+
+    - name: Generate a Self Signed OpenSSL certificate
+      community.crypto.x509_certificate:
+        path: /etc/tower/tower.crt
+        privatekey_path: /etc/tower/tower.key
+        csr_path: /etc/tower/tower.csr
+        provider: selfsigned
+
+    - name: Remove default server section in nginx configuration
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Remove default configuration in receptor
+      ansible.builtin.template:
+        src: receptor.conf.j2
+        dest: /etc/receptor/receptor.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Set firewall service rules
+      ansible.posix.firewalld:
+        zone: public
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - http
+        - https
+
+    - name: Set firewall port rules
+      ansible.posix.firewalld:
+        zone: public
+        port: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - 27199/tcp
+
+    - name: Enable and start ol-automation service
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      with_items:
+        - ol-automation-manager
+
+    - name: Check if user is lingering
+      ansible.builtin.stat:
+        path: "/var/lib/systemd/linger/awx"
+      register: user_lingering
+
+    - name: Enable lingering is needed
+      ansible.builtin.command: "loginctl enable-linger awx"
+      register: linger_result
+      changed_when: linger_result.rc == 0
+      when: not user_lingering.stat.exists

@@ -1,0 +1,25 @@
+{# 
+Copyright (c) 2024 Oracle and/or its affiliates.
+This software is made available to you under the terms of the Universal Permissive License (UPL), Version 1.0.
+The Universal Permissive License (UPL), Version 1.0 (see COPYING or https://oss.oracle.com/licenses/upl)
+See LICENSE.TXT for details.
+#}
+
+- node:
+    id: {{ control_node_ip }}
+ 
+- log-level: debug
+ 
+- tcp-listener:
+    port: 27199
+ 
+- control-service:
+    service: control
+    filename: /var/run/receptor/receptor.sock
+ 
+- work-command:
+    worktype: {% if 'control' or 'hop' in group_names %}local{% else %}ansible-runner{% endif %}{{''}}
+    command: /var/lib/ol-automation-manager/venv/awx/bin/ansible-runner
+    params: worker
+    allowruntimeparams: true
+#    verifysignature: true

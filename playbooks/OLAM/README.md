@@ -95,7 +95,6 @@ Playbooks are copied from earlier work in [linux-virt-labs Github repository](ht
 1. Run the playbook:
 
     ```
-
     ansible-playbook -i inventory/hosts.ini deploy_olam_single.yml
     or
     ansible-playbook -i inventory/hosts.ini deploy_olam_cluster.yml

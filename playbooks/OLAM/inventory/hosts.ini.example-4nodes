@@ -9,17 +9,17 @@
 #
 # Description:
 # Inventory file for the deployment of an Oracle Linux Automation
-# Manager 2.2 clustered environment.
+# Manager 2.3 clustered environment.
 #
 # Define groups and corresponding hostnames for the Oracle Linux
-# Automation Manager 2.2 cluster.
+# Automation Manager 2.3 cluster.
 #
-# control_nodes - list of control plane nodes
-# execution_nodes - list of execution and hop nodes
-# local_execution_group - list of local execution nodes, which is a subset of execution_nodes
-# hop - list of hop nodes, which is a subset of execution_nodes
-# remote_execution_group - list of remote execution nodes, which is a subset of execution_nodes
-# db_nodes - list of database nodes
+# control:  		  list of control plane nodes
+# execution:  		  list of execution and hop nodes
+# local_execution_group:  list of local execution nodes, which is a subset of execution_nodes
+# hop: 			  list of hop nodes, which is a subset of execution_nodes
+# remote_execution_group: list of remote execution nodes, which is a subset of execution_nodes
+# db: 			  list of database nodes
 #
 # Create the peering within the cluster using the group_vars and the "peers" variable. The example
 # shows the local executions nodes as peers of the control plane nodes, indicating communication
@@ -28,41 +28,35 @@
 # The "all" group_vars include the user and OpenSSH keypair used to connect to each node and the
 # specific python version used once connected.
 #
-[control_nodes]
-olam-control01
-olam-control02
+[control]
+oci-control01
+oci-control02
 
-[control_nodes:vars]
+[control:vars]
 node_type=control
 peers=local_execution_group
 
-[execution_nodes]
-olam-execution01
-olam-execution02
-olam-remote-execution01
-olam-hop01
+[execution]
+oci-execution01
+oci-execution02
 
 [local_execution_group]
-olam-execution01
-olam-execution02
+oci-execution01
+oci-execution02
 
 [local_execution_group:vars]
 node_type=execution
 
 [hop]
-olam-hop01
 
 [hop:vars]
-peers=control_nodes
 
 [remote_execution_group]
-olam-remote-execution01
 
 [remote_execution_group:vars]
-peers=hop
 
-[db_nodes]
-olam-db
+[db]
+oci-db
 
 [all:vars]
 ansible_user=opc

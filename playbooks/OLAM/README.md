@@ -1,12 +1,21 @@
-# Oracle Linux Automation Manager 2.2 Single Host Deployment
+# Oracle Linux Automation Manager 2.3 Deployment
 
-The playbook provides a single host installation of [Oracle Linux Automation Manager](https://docs.oracle.com/en/operating-systems/oracle-linux-automation-manager/) using the details from an inventory file.
+The playbook provides an installation of [Oracle Linux Automation Manager](https://docs.oracle.com/en/operating-systems/oracle-linux-automation-manager/) using the details from an inventory file. Two playbooks are provided for a single node (hybrid) or a cluster installation.
 
-It configures a single node with the following roles:
+For the single node install, it configures a node with the following roles:
 
 - database
 - control plane
 - execution
+
+For the clustered install, it configures multiple nodes with the following roles:
+
+- remote database
+- control planes nodes
+- local execution nodes
+- optionally a hop node and remote execution nodes
+
+Examples inventory files are provided for single node, 4-node cluster with two control plane nodes and two local execution nodes or a 6-node cluster with two control plane nodes, two local execution nodes, a hop node and a remote execution node.
 
 Playbooks are copied from earlier work in [linux-virt-labs Github repository](https://github.com/oracle-devrel/linux-virt-labs) and adjusted for a generic installation..
 
@@ -14,9 +23,9 @@ Playbooks are copied from earlier work in [linux-virt-labs Github repository](ht
 
 ### Assumptions
 
-1. You have one Oracle Linux 8 host running
+1. You have one Oracle Linux 9 hosts running (Oracle Linux 8 nodes are supported, but not mixed)
 1. You have setup the required OpenSSH keys
-1. You have the necessary permissions and access for the target host user with sudo access
+1. You have the necessary permissions and access for the target hosts user with sudo access
 
 ### Pre-requisites
 
@@ -33,12 +42,12 @@ Playbooks are copied from earlier work in [linux-virt-labs Github repository](ht
 
     ```
     git clone https://github.com/oracle-samples/ansible-playbooks.git ol-playbooks
-    cd ol-playbooks/playbooks/OLAM/single-node
+    cd ol-playbooks/playbooks/OLAM
     cp group_vars/all.yml.example group_vars/all.yml
-    cp inventory/hosts.ini.example inventory/hosts.ini
+    cp inventory/hosts.ini.example-<deployment type> inventory/hosts.ini
     ```
 
-1. Edit the group variables:
+1. Edit the `group_var/all.yml` variables file:
 
     ```
     # Enter the password for postgress awx user
@@ -55,12 +64,14 @@ Playbooks are copied from earlier work in [linux-virt-labs Github repository](ht
 
     This file also contains a variable for setting a proxy if required to reach the internet from the Oracle Linux Automation Manager nodes.
 
-1. Edit the inventory:
+1. Edit the `inventory/hosts.ini` file (see example files for additional instructions) and change to your hostnames and SSH keys:
 
     ```
     [control]
-    my_olam_node
-    
+    oci-olamsingle
+    [execution]
+    .....
+    .....
     [all:vars]
     ansible_user=opc
     ansible_ssh_private_key_file=~/.ssh/id_rsa
@@ -84,8 +95,9 @@ Playbooks are copied from earlier work in [linux-virt-labs Github repository](ht
 1. Run the playbook:
 
     ```
-
     ansible-playbook -i inventory/hosts.ini deploy_olam_single.yml
+    or
+    ansible-playbook -i inventory/hosts.ini deploy_olam_cluster.yml
     ```
 
 ## Resources

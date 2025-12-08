@@ -336,7 +336,7 @@
 
     - name: Set awx password
       ansible.builtin.expect:
-        command: "awx-manage createsuperuser --username admin --email admin@example.com"
+        command: "awx-manage createsuperuser --username admin --email {{ admin_email }}"
         responses:
           'Password:': "{{ olam_admin_password }}"
           'Password \(again\):': "{{ olam_admin_password }}"

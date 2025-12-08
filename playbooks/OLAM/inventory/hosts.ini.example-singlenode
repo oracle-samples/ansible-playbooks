@@ -7,13 +7,13 @@
 # Inventory file for the deployment of an Oracle Linux Automation
 # Manager 2.3 hybrid node environment (single node).
 #
-# control - node to run control, ececution and db
+# control: 	node to run control, execution and db
 #
 # The "all" group_vars include the user and OpenSSH keypair used to connect to each node and the
 # specific python version used once connected.
 #
 [control]
-my_olam_node
+oci-olamsingle
 
 [all:vars]
 ansible_user=opc

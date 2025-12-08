@@ -2,27 +2,18 @@
 # File:        group_vars/all.yml
 # Description: group_vars for "all" hosts in the inventory file
 
-# Create Linux non-opc user account for installing Oracle Linux Automation Manager
-
-"username": oracle
-
-# Enter the non-hashed password for the non-opc user account.
-
-"user_default_password": oracle
+# Generic variables:
+olam_ee_tag: 2.3.1-1
+debug_enabled: false
+admin_email: admin@example.com
 
 # Enter the password for PostgreSQL awx user
 
-"awx_pguser_password": CHANGE_ME
+"awx_pguser_password": CHANGEME
 
 # Enter the password for PostgreSQL awx user
 
-"olam_admin_password": CHANGE_ME
-
-# Enter the name of a local ssh public key file located in the ~/.ssh directory. This key appends
-# to the non-opc user account's authorized_keys file. Replace <username> and <keypair> with
-# your user.
-
-"ssh_keyfile": /home/<username>/.ssh/<keypair>.pub
+"olam_admin_password": CHANGEME
 
 # Set proxy if needed
 # Uncomment both the pip_proxy_env and proxy_env sections, and set the proxy host and port accordingly.

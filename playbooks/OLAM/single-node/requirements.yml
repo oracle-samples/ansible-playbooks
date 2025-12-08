@@ -1,9 +1,0 @@
----
-roles:
-    
-collections:
-  - ansible.posix
-  - community.general
-  - community.postgresql
-  - community.crypto
-  - containers.podman

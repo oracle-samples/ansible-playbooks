@@ -1,0 +1,49 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+#
+# This playbook uses the following additional variables which should be configured at run time for the template:
+# db_name: oradb1,oradb2,oradb<N> 
+# db_sys_password: <sys_password> 
+
+- name: MAAaaS Framework 
+  hosts: all 
+  order: sorted
+  gather_facts: true 
+
+  vars_prompt:
+    - name: database_list 
+      prompt: Oracle - Enter the list of databases (comma separated)
+      private: false 
+    - name: db_sys_password
+      prompt: Password - Enter the password for user SYS ([8=>length<=30][A-Z][a-z][0-9][-!@%&*.#])
+      # default: "{{ vault_gg_deployment_password | default(lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'ascii_uppercase', 'digits', '[-!@%&*.#]'], length=20)) }}G*1w"
+      private: true 
+      unsafe: true 
+      confirm: true
+
+  collections:
+    - ansible.builtin
+    - community.general
+    - oracle.dbaas 
+    
+  roles:
+    # Before
+    - framework_start
+
+    # Actions
+    # - dbaas_dataguard_configure
+    - dbaas 
+
+    # After
+    - framework_stop
+
+...

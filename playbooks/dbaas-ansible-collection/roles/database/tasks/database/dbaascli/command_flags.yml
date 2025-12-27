@@ -1,0 +1,56 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI set database move flags
+  set_fact:
+    db_name_flag: true
+    dbUniqueName_flag: false
+    pdb_name_flag: false
+    db_role_flag: "defined"
+    prereqs_flag: true
+    log_analyze_flag: true
+  when: dbaascli_command == 'database move'
+
+- name: DBaaSCLI set database create flags
+  set_fact:
+    db_name_flag: true
+    dbUniqueName_flag: true 
+    dbUniqueName: "{{ db_name }}_prim"
+    pdb_name_flag: true 
+    pdb_name: "{{ pdb_name }}"
+    db_role_flag: "not defined"
+    prereqs_flag: true
+    log_analyze_flag: true
+  vars:
+    pdbNumber: 1
+  when: dbaascli_command == 'database create'
+
+- name: DBaaSCLI set database delete flags
+  set_fact:
+    db_name_flag: true
+    dbUniqueName_flag: false 
+    pdb_name_flag: false 
+    options: "--deleteArchiveLogs true --deleteBackups true"
+    db_role_flag: "defined" 
+    prereqs_flag: true
+    log_analyze_flag: true
+  when: dbaascli_command == 'database delete'
+
+- name: DBaaSCLI set database modifyParameters flags
+  set_fact:
+    db_name_flag: true
+    dbUniqueName_flag: false 
+    pdb_name_flag: false 
+    db_role_flag: "defined" 
+    prereqs_flag: false 
+    log_analyze_flag: true
+  when: "'database modifyParameters' in dbaascli_command"

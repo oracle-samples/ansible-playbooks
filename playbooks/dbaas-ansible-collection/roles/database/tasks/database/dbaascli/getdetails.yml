@@ -1,0 +1,29 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Block - DBaaSCLI database getDetails 
+  become: true
+  when: 
+    - database_config.db_role is defined
+    - ansible_hostname in database_config.master_node
+  block:
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI database getDetails
+        -----------------
+        {{ database_config | to_nice_yaml }}
+        ==================================================
+    tags: [print_action]

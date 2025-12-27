@@ -1,0 +1,36 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI database delete 
+  become: true
+  throttle: 1
+  when: 
+    - database_config.db_role is defined
+    - ansible_hostname in database_config.master_node
+  block:
+
+  - name: Run DBaaSCLI database delete standby
+    command: "dbaascli database delete --db_name {{ db_name }}"
+    register: _dbaascli_database_delete_standby
+    failed_when: "'dbaascli execution completed' not in _dbaascli_database_delete_standby.stdout"
+    when:
+      - (('primary' in ansible_run_tags) or 
+        ('standby' in ansible_run_tags)) 
+      - database_config.db_role == "physical_standby"
+
+  - name: Run DBaaSCLI database delete primary 
+    command: "dbaascli database delete --db_name {{ db_name }}"
+    register: _dbaascli_database_delete_primary
+    failed_when: "'dbaascli execution completed' not in _dbaascli_database_delete_primary.stdout"
+    when:
+      - "'primary' in ansible_run_tags" 
+      - database_config.db_role == "primary"

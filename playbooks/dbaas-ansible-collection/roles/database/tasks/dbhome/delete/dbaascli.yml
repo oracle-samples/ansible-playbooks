@@ -1,0 +1,126 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI dbHome delete - version - Block
+  become: true
+  when: ansible_hostname in grid_config.master_node
+  block:
+
+  - name: DBaasCLI system getDBHomes
+    become: true
+    shell: >
+      dbaascli system getDBHomes 
+      --showOutputDelimiter 
+      | sed -n '/Start of output/, /End of output/{ /Start of output/! { /End of output/! p }}'
+    register: _dbaascli_system_getDBHomes
+
+  - name: Write fact _OracleHome_facts from _dbaascli_database_getDetails
+    ansible.builtin.set_fact:
+      cacheable: false
+      _OracleHome_facts: "{{ _OracleHome_facts | default({}) | combine(_dbhome | items2dict) }}"
+    vars:
+      _dbhome:
+        - key: dbhome 
+          value: "{{ _dbaascli_system_getDBHomes.stdout | from_json | community.general.json_query('*') }}"
+    when: 
+      - _dbaascli_system_getDBHomes is defined
+      - _dbaascli_system_getDBHomes.stdout | length > 0
+
+  - name: Write fact _dbHomeTarget
+    ansible.builtin.set_fact:
+      _oracleHomeVersion: "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomeVersion_query) | sort | last | default('no_oracle_home_found') }}"
+      _oracleHomeName:    "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomeName_query)    | sort | last | default('no_oracle_home_found') }}"
+      _oracleHomePath:    "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomePath_query)    | sort | last | default('no_oracle_home_found') }}"
+    vars:
+      oracleHomeVersion_query:  "dbhome[?starts_with(version,'{{ version }}')].version"
+      oracleHomeName_query:     "dbhome[?starts_with(version,'{{ version }}')].homeName"
+      oracleHomePath_query: "dbhome[?starts_with(version,'{{ version }}')].homePath"
+    when: 
+      - version is defined
+      - _OracleHome_facts is defined
+
+  - name: Write fact _dbHomeTarget
+    ansible.builtin.set_fact:
+      oracleHomeName: "{{ _oracleHomeName }}"
+    when:
+      - _oracleHomeName is defined 
+      - _oracleHomeName != 'no_oracle_home_found'
+
+- name: DBaaSCLI dbHome delete - oracleHomePath - Block
+  become: true
+  when:
+    - ansible_hostname in grid_config.master_node
+    - oracleHomePath is defined
+  block:
+
+  - name: DBaaSCLI dbHome getDetails
+    shell: >
+      dbaascli dbHome getDetails 
+      {% if oracleHomeName is defined %}--oracleHomeName {{ oracleHomeName }}{% endif %}
+      {% if oracleHomePath is defined %}--oracleHome {{ oracleHomePath }}{% endif %}
+      --showOutputDelimiter 
+      | sed -n '/Start of output/, /End of output/{ /Start of output/! { /End of output/! p }}'
+    register: dbaascli_dbHome_getdetails
+    failed_when: 
+      - dbaascli_dbHome_getdetails.rc != 0
+      - "'[FATAL] [DBAAS-60154]' not in dbaascli_dbHome_getdetails.stdout"
+      # [FATAL] [DBAAS-60154] Oracle home with the name 'OraHome5' not found in the inventory.
+
+  - debug: var=dbaascli_dbHome_getdetails
+
+  - name: Write fact _DBHomeTarget from _dbaascli_dbHome_create 
+    ansible.builtin.set_fact:
+      oracleHomeName: "{{ dbaascli_dbHome_getdetails.stdout | from_json | community.general.json_query('homeName') }}"
+      oracleHomePath: "{{ dbaascli_dbHome_getdetails.stdout | from_json | community.general.json_query('homePath') }}"
+    when:
+      - oracleHomeName is not defined 
+      - dbaascli_dbHome_getdetails.rc == 0
+
+- name: DBaaSCLI dbHome delete - Block
+  become: true
+  when:
+    - ansible_hostname in grid_config.master_node
+    - oracleHomeName is defined
+  block:
+
+  - name: DBaaSCLI dbHome getDatabases
+    shell: > 
+      dbaascli dbHome getDatabases 
+      --oracleHomeName {{ oracleHomeName }} 
+    register: dbaascli_dbHome_getdatabases
+    failed_when: 
+      - dbaascli_dbHome_getdatabases.rc != 0
+      - "'[FATAL] [DBAAS-60154]' not in dbaascli_dbHome_getdatabases.stdout"
+      # [FATAL] [DBAAS-60154] Oracle home with the name 'OraHome5' not found in the inventory.
+
+  - name: DBaaSCLI dbHome delete 
+    shell: >
+      dbaascli dbHome delete 
+      --oracleHomeName {{ oracleHomeName }} 
+    register: dbaascli_dbHome_delete
+    when: 
+      - "'[WARNING] [DBAAS-80101] Unable to get list of databases' in dbaascli_dbHome_getdatabases.stdout" 
+      - "'CAUSE: There are no databases registered in the system' in dbaascli_dbHome_getdatabases.stdout" 
+    failed_when: "'dbaascli execution completed' not in dbaascli_dbHome_delete.stdout"
+
+  # - pause:
+  #     seconds: 0
+  #     prompt: |
+  #       ==================================================
+  #       DBaaSCLI dbHome delete 
+  #       -----------------
+  #         {{ dbaascli_dbHome_delete.stdout | trim }}
+  #       ==================================================
+  #   when: dbaascli_dbHome_delete.changed 
+  #   tags: [print_action]
+
+...

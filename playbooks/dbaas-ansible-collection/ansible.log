@@ -1,0 +1,16 @@
+2025-06-13 03:48:33,103 p=3612672 u=salasino n=ansible WARNING| [WARNING]:  * Failed to parse /scratch/salasino/ansible/dbaas-ansible-collection/inventory/vault_pass with
+ansible_collections.ansible.builtin.plugins.inventory.yaml plugin: YAML inventory has invalid structure, it should be a dictionary, got: <class
+'ansible.parsing.yaml.objects.AnsibleUnicode'>
+
+2025-06-13 03:48:33,103 p=3612672 u=salasino n=ansible WARNING| [WARNING]:  * Failed to parse /scratch/salasino/ansible/dbaas-ansible-collection/inventory/vault_pass with
+ansible_collections.ansible.builtin.plugins.inventory.ini plugin: /scratch/salasino/ansible/dbaas-ansible-collection/inventory/vault_pass:2: Expected
+key=value host variable assignment, got: os
+
+2025-06-13 03:48:33,103 p=3612672 u=salasino n=ansible WARNING| [WARNING]:  * Failed to parse /scratch/salasino/ansible/dbaas-ansible-collection/inventory/vault_pass with constructed plugin: 'AnsibleUnicode' object
+has no attribute 'get'
+
+2025-06-13 03:48:33,103 p=3612672 u=salasino n=ansible WARNING| [WARNING]: Unable to parse /scratch/salasino/ansible/dbaas-ansible-collection/inventory/vault_pass as an inventory source
+
+2025-06-13 03:48:33,128 p=3612672 u=salasino n=ansible INFO| @all:
+  |--@ungrouped:
+  |  |--localhost

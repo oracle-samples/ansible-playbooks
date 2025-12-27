@@ -1,0 +1,184 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Pre_tasks 
+  block:
+
+  - name: DBaaSCLI dbhome create  
+    include_tasks: 
+      file: dbaascli_dbhome_create.yml
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    when: version is defined
+
+  - import_tasks: awr_snapshot_create.yml
+
+  - name: Add element to stats_pack_snap_end
+    set_fact:
+      stats_pack_snap_end: "{{ stats_pack_snap_end | default([]) + [stats_pack_snap.stdout | trim] }}"
+    when: stats_pack_snap_end.changed is true
+
+  - import_tasks: dbaascli_command_flags.yml
+
+  # - name: Run dbaascli cswlib download
+  #   command: "dbaascli cswlib download --version {{ targetVersion }}"
+  #   register: dbaascli_cswlib_download
+  #   when: targetVersion is defined
+  #   failed_when: "'dbaascli execution completed' not in dbaascli_cswlib_download.stdout"
+
+- name: DBaaSCLI command prereqs
+  become: true
+  when: 
+    - prereqs_flag is true
+    - "database_config.db_role is {{ db_role_flag }}" 
+  block:
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      timeline_task_name: "{{ dbaascli_command | split(' --') | first | replace(' ','_') }}_prereqs"
+      status: Running
+    when: "'framework' in ansible_run_tags"
+
+  - name: Run DBaaSCLI command prereqs
+    expect:
+      command: >
+        dbaascli {{ dbaascli_command }} 
+        {% if db_name_flag is true %}--db_name {{ db_name }} {% endif %}
+        {% if dbUniqueName_flag is true %}--dbUniqueName {{ dbUniqueName }}{% endif %}
+        {% if pdb_name_flag is true %}--pdb_name {{ pdb_name }}{% endif %}
+        {% if oracleHome is defined %}--oracleHome {{ oracleHome }}{% endif %} 
+        {% if oracleHomeName is defined %}--oracleHomeName {{ oracleHomeName }}{% endif %} 
+        {% if _dbHomeTargetName is defined %}--oracleHomeName {{ _dbHomeTargetName }}{% endif %} 
+        {% if targetVersion is defined %}--version {{ targetVersion }}{% endif %} 
+        {% if options is defined %}{{ options }}{% endif %}
+        --prereqs
+      responses:
+        Enter SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD: "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600
+    register: dbaascli_command_output_prereqs
+    throttle: 1
+    changed_when: "'dbaascli execution completed' not in dbaascli_command_output_prereqs.stdout"
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      timeline_task_name: "{{ dbaascli_command | split(' --') | first | replace(' ','_') }}_prereqs"
+      status: Completed
+    when:
+      - "'framework' in ansible_run_tags" 
+      - "'dbaascli execution completed' in dbaascli_command_output_prereqs.stdout"
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      timeline_task_name: "{{ dbaascli_command | split(' --') | first | replace(' ','_') }}_prereqs"
+      status: Failed 
+    when:
+      - "'framework' in ansible_run_tags" 
+      - "'dbaascli execution completed' not in dbaascli_command_output_prereqs.stdout"
+
+  - set_fact:
+      _dbaastools_log: "{{ dbaascli_command_output_prereqs.stdout | regex_search('Session log: (.+)') | split(': ') | last }}"
+    when: 
+      - log_analyze_flag is true
+      - "'dbaascli execution completed' in dbaascli_command_output_prereqs.stdout"
+
+  - import_tasks: dbaascli_log_analyze.yml
+    when: 
+      - log_analyze_flag is true
+      - "'dbaascli execution completed' in dbaascli_command_output_prereqs.stdout"
+
+- name: DBaaSCLI command 
+  become: true
+  when:
+    - "database_config.db_role is {{ db_role_flag }}"
+    - "'prereqs' not in ansible_run_tags"
+    - (dbaascli_command_output_prereqs.skipped is true) or ("'dbaascli execution completed' in dbaascli_command_output_prereqs.stdout")
+  block:
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      status: Running
+    when:
+      - "'framework' in ansible_run_tags" 
+
+  - name: Run DBaaSCLI command 
+    expect:
+      command: >
+        dbaascli {{ dbaascli_command }}
+        {% if db_name_flag is true %}--db_name {{ db_name }}{% endif %}
+        {% if dbUniqueName_flag is true %}--dbUniqueName {{ database_config.dbUniqueName }}{% endif %}
+        {% if pdb_name_flag is true %}--pdb_name {{ pdb_name }}{% endif %}
+        {% if oracleHome is defined %}--oracleHome {{ oracleHome }}{% endif %}
+        {% if oracleHomeName is defined %}--oracleHomeName {{ oracleHomeName }}{% endif %} 
+        {% if _dbHomeTargetName is defined %}--oracleHomeName {{ _dbHomeTargetName }}{% endif %} 
+        {% if targetVersion is defined %}--version {{ targetVersion }}{% endif %}
+        {% if options is defined %}{{ options }}{% endif %}
+        {% if force is true %}--force{% endif %}
+        {% if extraParameters is defined %}{{ extraParameters }}{% endif %}
+      responses:
+        Enter SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD: "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600
+    register: dbaascli_command_output
+    throttle: 1
+    failed_when: "'dbaascli execution completed' not in dbaascli_command_output.stdout"
+
+  - name: Add dbaascli_command_output to story
+    set_fact:
+     story: "{{ story | default([]) + [dbaascli_command_output.stdout] }}"
+    when: dbaascli_command_output.rc == 0 
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      status: Completed 
+    when:
+      - "'framework' in ansible_run_tags" 
+      - dbaascli_command_output.rc == 0
+
+  - import_tasks: timeline_log_write.yml
+    vars:
+      status: Failed 
+    when:
+      - "'framework' in ansible_run_tags" 
+      - dbaascli_command_output.rc != 0
+
+  - set_fact:
+      _dbaastools_log: "{{ dbaascli_command_output.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"
+    when: 
+      - log_analyze_flag is true 
+      - "'dbaascli execution completed' in dbaascli_command_output.stdout"
+
+  - import_tasks: dbaascli_log_analyze.yml
+    when: 
+      - log_analyze_flag is true
+      - "'dbaascli execution completed' in dbaascli_command_output.stdout"
+
+  - name: Print Story facts
+    debug:
+      msg: "{{ item }}"
+    with_items: "{{ story }}"                                                            
+    when: story is defined
+
+- name: Post_tasks 
+  block:
+
+  - import_tasks: awr_snapshot_create.yml
+
+  - name: Add element to stats_pack_snap_begin
+    set_fact:
+      stats_pack_snap_begin: "{{ stats_pack_snap_begin | default([]) + [stats_pack_snap.stdout | trim] }}"
+    when: stats_pack_snap_end.changed is true

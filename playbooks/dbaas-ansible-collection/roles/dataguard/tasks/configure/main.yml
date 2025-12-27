@@ -1,0 +1,104 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: dataguard configure 
+  when: oracle_facts.server.dbservers
+  tags: configure
+  block:
+
+  - name: prereqs 
+    include_tasks:
+      file: prereqs/main.yml  
+      apply:
+        tags: 
+          - always
+          - prereqs
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: always
+
+  - name: DBaasCLI - Run Database Home create 
+    ansible.builtin.include_role:
+      name: database 
+      tasks_from: dbhome/create/dbaascli.yml 
+      apply:
+        tags: 
+          - always
+          - prereqs
+    vars:
+      version: "{{ hostvars['localhost']['primary']['oracle_home_version'] }}" 
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    when: 
+      - system_config.dbaascli_on
+      - hostname_target is defined
+      - ansible_hostname in hostname_target
+    tags: always
+
+  - name: DBaasCA - Run Database Home create 
+    ansible.builtin.include_role:
+      name: database 
+      tasks_from: dbhome/create/dbaasca.yml 
+      apply:
+        tags: 
+          - always
+          - prereqs
+    vars:
+      version: "{{ hostvars['localhost']['primary']['oracle_home_version'] }}" 
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    when: 
+      - not system_config.dbaascli_on
+      - hostname_target is defined
+      - ansible_hostname in hostname_target
+    tags: always
+
+  - name: primary prepare
+    include_tasks:
+      file: primary/main.yml 
+      apply:
+        tags: 
+          - primary_prepare 
+          - configure
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: always 
+
+  - name: standby configure
+    include_tasks:
+      file: standby/configure/main.yml  
+      apply:
+        tags: 
+          - standby_configure
+          - configure
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: always 
+
+  - name: standby register
+    include_tasks:
+      file: standby/register/main.yml  
+      apply:
+        tags: 
+          - standby_configure
+          - configure
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: always 
+
+...

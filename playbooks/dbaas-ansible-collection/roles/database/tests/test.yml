@@ -1,0 +1,15 @@
+#SPDX-License-Identifier: MIT-0
+---
+- hosts: all 
+  # remote_user: root
+  # roles:
+  #   - dbaas
+  tasks:
+
+  - debug: var=pdbm.{{ target_db_name }}.sourceDBConnectionString
+
+  - debug: 
+      msg: "{{ pdbm | json_query(sourceDBConnectionString_query) }}"
+    vars:
+      sourceDBConnectionString_query: "{{ target_db_name }}.sourceDBConnectionString"
+

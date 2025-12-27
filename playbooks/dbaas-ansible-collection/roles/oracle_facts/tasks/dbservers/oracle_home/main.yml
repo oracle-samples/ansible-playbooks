@@ -1,0 +1,188 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Gather facts for Oracle Homes 
+  become: true
+  when: oracle_facts.system.inventory_loc | length > 0
+  block:
+
+    - name: Install lxml 
+      pip: 
+        name: lxml
+      timeout: 60 
+    
+    - name: Gather Oracle Homes from inventory.xml 
+      community.general.xml:
+        path: "{{ oracle_facts.system.inventory_loc }}/ContentsXML/inventory.xml"
+        xpath: /INVENTORY/HOME_LIST/HOME
+        content: attribute
+      register: _inventory_xml
+    
+    - name: Write facts OracleHome_facts
+      ansible.builtin.set_fact:
+        OracleHome_facts: "{{ OracleHome_facts | default({}) | combine(_OracleHome_facts | items2dict) }}"
+      vars:
+        _OracleHome_facts:
+          - key: "dbHome_{{ __dbHome.IDX }}" 
+            value:
+              oracleHomeName: "{{ __dbHome.NAME }}"
+              oracleHomePath: "{{ __dbHome.LOC }}"
+              CRS: "{{ __dbHome.CRS | default(false) | bool }}"
+      with_items: "{{ _inventory_xml.matches | map(attribute='HOME') | reject('search','REMOVED') }}"
+      loop_control:
+        loop_var: __dbHome
+      when: _inventory_xml.count > 0
+
+    - name: Write fact _dbHomeTargetExists 
+      set_fact:
+        _dbHomeTargetExists: "{% if (OracleHome_facts | to_json | from_json | json_query(dbHomeTarget_query) | selectattr('homePath', 'search', oracle_home_target) | length > 0) %}{{ true|bool }}{% else %}{{ false|bool }}{% endif %}"
+      vars:
+        dbHomeTarget_query: "*.{homePath: homePath}"
+      when: oracle_home_target is defined
+
+    - name: Write fact _ggHomeTargetExists 
+      set_fact:
+        _ggHomeTargetExists: "{% if (OracleHome_facts | to_json | from_json | json_query(ggHomeTarget_query) | selectattr('homePath', 'search', goldengate.oracle_home_target ) | length > 0) %}{{ true|bool }}{% else %}{{ false|bool }}{% endif %}"
+      vars:
+        ggHomeTarget_query: "*.{homePath: homePath}"
+      when: goldengate.oracle_home_target is defined
+    
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of dbHome 
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_facts_dbHome_ignore_failed=true in inventory/group_vars/all to disable this fail task.
+      when:
+        - not oracle_facts_dbHome_ignore_failed | default(false)
+
+    - name: Write empty facts to system(rescue from failure above)
+      ansible.builtin.set_fact:
+        cacheable: false
+        OracleHome_facts: "{{ OracleHome_facts | default({}) | combine(_OracleHome_facts | items2dict) }}"
+      vars:
+        _OracleHome_facts:
+          - key: dbHome 
+            value:
+              state: failed 
+    
+    # - name: Find oraInst.loc file 
+    #   stat:
+    #     path: /etc/oraInst.loc
+    #   register: _oraInst_found
+
+    # - name: Reading oraInst.loc file
+    #   slurp:
+    #     src: /etc/oraInst.loc
+    #   register: _inventory_loc 
+    #   when: _oraInst_found.stat.exists
+
+    # - name: Set inventory_loc fact 
+    #   set_fact:
+    #     inventory_loc: "{{ _inventory_loc['content'] | b64decode | regex_search('inventory_loc=(.+)', '\\1') | first }}"
+    #   when: _oraInst_found.stat.exists
+
+    # - name: Read inventory_loc
+    #   community.general.xml:
+    #     path: "{{ inventory_loc }}/ContentsXML/inventory.xml"
+    #     xpath: /INVENTORY/HOME_LIST/HOME
+    #     content: attribute
+    #   register: _inventory_xml
+
+    # - name: Get database full version 
+    #   shell: |
+    #     {{ _oracle_home }}/bin/oraversion -compositeVersion
+    #   when: _oracle_home is defined
+    #   register: _oraversion
+
+
+    # - debug:
+    #     msg: "{% set output = [] %}\
+    #           {% for item in xmlresp.matches | map(attribute='HOME') %}\
+    #           {{ output.append( 'HOME_' ~ item.IDX ~ ': ' ~ item.LOC ) }}\
+    #           {% endfor %}\
+    #           {{ output }}"
+
+    # - name: Generate location_quoted
+    #   set_fact:
+    #     oracle_homes_jinja: |
+    #       {% for item in xmlresp.matches | map(attribute='HOME') %}
+    #       {{ 'HOME_' ~ item.IDX ~ ': ' ~ item.LOC }}
+    #       {% endfor %}
+
+    # - name: Find installed Oracle Homes 
+    #   set_fact:
+    #     _oracle_homes_yaml: "{{ ___LOC | zip(___NAME) | map('join', ',') }}"
+    #   vars:
+    #     __xml_command_results: "{{ _inventory_xml.matches | map(attribute='HOME') }}"
+    #     ___NAME: "{{ __xml_command_results | map(attribute='NAME') }}"
+    #     ___LOC: "{{ __xml_command_results | map(attribute='LOC') }}"
+
+    # - name: Get BUILD_LABEL
+    #   shell: |
+    #     grep 'use constant CATCONST_BUILD_LABEL' {{ __oracle_home }}/rdbms/admin/catconst.pm | awk -F"'" '{print $2 ",{{ __oracle_home }}"}'
+    #   with_items: "{{ _inventory_xml.matches | map(attribute='HOME') | map(attribute='LOC') }}"
+    #   loop_control:
+    #     loop_var: __oracle_home 
+    #   when: "'product' in __oracle_home"
+    #   register: _catconst_build_label
+
+    # - name: Write Oracle Homes facts
+    #   ansible.builtin.set_fact:
+    #     cacheable: false
+    #     oracle_home_facts: "{{ oracle_home_facts | default({}) | combine(_oracle_homes | items2dict) }}"
+    #   vars:
+    #     _oracle_homes:
+    #       - key: "DBHOME_IDX{{ __inventory_xml_matches.HOME.IDX }}" 
+    #         value:
+    #           # build_label: "{{ _catconst_build_label.stdout | regex_findall('(.+){{ __inventory_xml_matches.HOME.LOC }}') }}"
+    #           oracle_home_path: "{{ __inventory_xml_matches.HOME.LOC }}"
+    #           oracle_home_name: "{{ __inventory_xml_matches.HOME.NAME }}"
+    #   with_items: 
+    #     - "{{ _inventory_xml.matches }}"
+    #   loop_control:
+    #     loop_var: __inventory_xml_matches
+    #   when: "'product' in __inventory_xml_matches.HOME.LOC"
+
+    # - debug:
+    #     msg: "{{ item.stdout }}" 
+    #   with_items: "{{ _catconst_build_label.results }}" 
+    #   when: item.changed | bool
+
+    # - debug:
+    #     msg: "{{ __inventory_xml_matches.HOME.LOC }}" 
+    #   with_items: 
+    #     - "{{ _inventory_xml.matches }}"
+    #   loop_control:
+    #     loop_var: __inventory_xml_matches
+    #   when: "'product' in __inventory_xml_matches.HOME.LOC"
+
+    # - name: Write Oracle Homes facts
+    #   ansible.builtin.set_fact:
+    #     cacheable: false
+    #     oracle_home_facts: "{{ oracle_home_facts | default({}) | combine(_oracle_homes | items2dict) }}"
+    #   vars:
+    #     _oracle_homes:
+    #       - key: "{{ __oracle_home_build_label.stdout }}" 
+    #         value:
+    #           build_label: "{{ __oracle_home_build_label.stdout }}"
+    #           oracle_home_path: "{{ __oracle_home_build_label.__oracle_home }}"
+    #           oracle_home_name: "{{ _inventory_xml.matches | map(attribute='HOME') | map(attribute='NAME') }}"
+    #   with_items: "{{ _catconst_build_label.results }}"
+    #   loop_control:
+    #     loop_var: __oracle_home_build_label 
+    #   when: 
+    #     - _catconst_build_label is defined
+    #     - __oracle_home_build_label.changed | bool
+
+...

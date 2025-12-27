@@ -1,0 +1,375 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCA Block 
+  become: true
+  when: 
+    - "'pilot' not in ansible_run_tags"
+    - not system_config.dbaascli
+    - database_config.db_role is defined
+    - database_config.db_role == 'primary'
+    - ansible_hostname in database_config.master_node
+    - hostvars['localhost']['primary'] is defined
+    - hostvars['localhost']['standby'] is defined
+  block:
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote acfs_mount_point 
+    file:
+      path: "{{ acfs_mount_point }}/{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: "{{ db_name_list }}" 
+
+  - name: Run DBaasCA prepareForStandby on primary DB
+    expect:
+      command: >
+        {{ dbaasca }}
+        -silent
+        -prepareForStandby
+        -configureDatabase
+        -dgTNSNamesoraFilePath {{ acfs_mount_point }}/{{ db_name }}
+        -sourceDB {% if database_facts[db_name].dbType == 'rac' %}{{ database_config.dbUniqueName }}{% else %}{{ database_config.instanceName }}{% endif %}
+        -standbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        {% if database_facts[db_name].dbType == 'rac' %}-standbyScanName {{ hostvars['localhost']['standby']['ScanIPAddresses'] }}{% else %}-standbyHostName {{ hostvars['localhost']['standby']['HostIPAddress'] }}{% endif %}
+        {% if database_facts[db_name].dbType == 'rac' %}-standbyScanPort {{ hostvars['localhost']['standby']['ScanPort'] }}{% else %}-standbyListenerPort {{ hostvars['localhost']['standby']['HostPort'] }}{% endif %}
+        -standbyDBDomain {{ database_config.dbDomain }} 
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: prepareForStandby 
+    no_log: true
+    # failed_when: "'Successfully created blob file' not in prepareForStandby.stdout"
+    become_user: oracle 
+    become_flags: "--login"
+    vars:
+      ansible_shell_allow_world_readable_temp: true
+    environment: "{{ oracle_env }}"
+    ignore_errors: true
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA prepareForStandby
+        -----------------
+        {{ prepareForStandby.cmd }}
+        -----------------
+        {{ prepareForStandby.stdout }} 
+        ==================================================
+    when: prepareForStandby is not skipped
+
+  - shell: >
+      grep SEVERE `ls -t {{ oracle_facts.system.inventory_loc | dirname }}/oracle/cfgtoollogs/dbca/trace.log_* | head -n1`
+    register: prepareForStandby_error
+    when: prepareForStandby.failed 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA prepareForStandby_error
+        -----------------
+        {{ prepareForStandby_error.stdout_lines }}
+        ==================================================
+    when: prepareForStandby.failed 
+    failed_when: prepareForStandby.failed 
+
+  # - name: Find prepareForStandby files 
+  #   find:
+  #     paths: "{{ stage_dir.managed.tmp }}" 
+  #     patterns: "{{ db_name }}_prepareForStandby.tar" 
+  #   register: prepareForStandby_files 
+  #   when: "'Successfully created blob file' in prepareForStandby.stdout"
+
+  - name: Set prepareForStandby_files fact
+    delegate_to: localhost
+    delegate_facts: true
+    when: prepareForStandby is success
+    ansible.builtin.set_fact:
+      prepareForStandby_files: "{{ prepareForStandby.stdout_lines | select('search','Successfully created blob file:') | first | split(': ') | last }}"
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ hostvars['localhost']['prepareForStandby_files'] }}"
+      dest: "/tmp/"
+      flat: yes
+    when: prepareForStandby is success
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+- name: PILOT Block 
+  become: true
+  when: 
+    - "'pilot' in ansible_run_tags"
+    - not system_config.dbaascli
+    - database_config.db_role is defined
+    - database_config.db_role == 'primary'
+    - ansible_hostname in database_config.master_node
+    - hostvars['localhost']['primary'] is defined
+    - hostvars['localhost']['standby'] is defined
+  block:
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote acfs_mount_point 
+    file:
+      path: "{{ acfs_mount_point }}/{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: "{{ db_name_list }}" 
+
+  - name: Run PILOT prepareForStandby on primary DB
+    expect:
+      command: >
+        {{ pilot }}
+        -silent 
+        -plugin prepare_db_for_standby_cloud 
+        db_name="{{ db_name }}" 
+        AGENT_DB_ID="00229ef0-d3da-4082-8ef0-d49768cac803" 
+        DBAASAPI_JOB_ID="jobid-{{ lookup('ansible.builtin.password', '/dev/null', chars=['digits'], length=5) }}" 
+        EXECUTE_PREREQS="{% if 'prereqs' in ansible_run_tags %}true{% else %}false{% endif %}" 
+        IGNORE_PREREQ_FAILURE="false" 
+        SKIP_PREREQS="false" 
+        STANDBY_DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}" 
+        STANDBY_DB_DOMAIN="{{ hostvars['localhost']['standby']['DBDomain'] }}"
+        STANDBY_SERVICE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}.{{ hostvars['localhost']['standby']['DBDomain'] }}" 
+        STANDBY_SCAN_NAME="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['standby']['ScanName'] }}{% else %}{{ hostvars['localhost']['standby']['HostIPAddress'] }}{% endif %}" 
+        STANDBY_SCAN_PORT="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['standby']['ScanPort'] }}{% else %}{{ hostvars['localhost']['standby']['HostPort'] }}{% endif %}" 
+        PRIMARY_SCAN_NAME="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['primary']['ScanName'] }}{% else %}{{ hostvars['localhost']['primary']['HostIPAddress'] }}{% endif %}" 
+        PRIMARY_SCAN_PORT="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['primary']['ScanPort'] }}{% else %}{{ hostvars['localhost']['primary']['HostPort'] }}{% endif %}" 
+        -logDir /var/opt/oracle/log/{{ db_name }}/dataguard/prepareForStandby
+        -checkpointDir {{ database_config.basePath }}/cfgtoollogs/dbca/checkpoints/oracle/prepare_for_standby
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: pilot_prepareForStandby
+    failed_when: "'Note: Prepare for Standby operation prechecks have been performed on the primary database' not in pilot_prepareForStandby.stdout"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        PILOT prepareForStandby
+        -----------------
+        {{ pilot_prepareForStandby.cmd }}
+        -----------------
+        {{ pilot_prepareForStandby.stdout }} 
+        ==================================================
+    when: pilot_prepareForStandby is not skipped
+
+  - name: Set prepareForStandby_files fact
+    delegate_to: localhost
+    delegate_facts: true
+    when: pilot_prepareForStandby is success
+    ansible.builtin.set_fact:
+      prepareForStandby_files: "{{ pilot_prepareForStandby.stdout_lines | regex_findall(', the file (.+) needs to be copied') | first }}"
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ hostvars['localhost']['prepareForStandby_files'] }}"
+      dest: "/tmp/"
+      flat: yes
+    when: hostvars['localhost']['prepareForStandby_files'] is defined
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+- name: DBaasCLI prereqs Block 
+  become: true
+  when: 
+    - database_config.db_role is defined
+    - hostvars['localhost']['standby'] is defined
+    - database_config.db_role == 'primary'
+    - system_config.dbaascli_on is true
+    - ansible_hostname in database_config.master_node
+    - "'prereqs' in ansible_run_tags"
+  block:
+
+  - name: Run DBaasCLI dataguard getDetails on primary DB
+    command: >
+      dbaascli dataguard getDetails 
+      --db_name {{ db_name }}
+    register: dataguard_getDetails
+    failed_when: 
+      - dataguard_getDetails.rc != 0
+      - "'DBAAS-80035' not in dataguard_getDetails.stdout"
+      # [DBAAS-80035] The following database does not have Oracle Data Guard enabled
+
+  - name: Run DBaasCLI dataguard enableMultipleStandbySupport on primary DB
+    command: >
+      dbaascli dataguard enableMultipleStandbySupport 
+      --db_name {{ db_name }}
+    register: dataguard_enableMultipleStandbySupport
+    when: 
+      - dataguard_getDetails is success
+      - "'dbaascli execution completed' in dataguard_getDetails.stdout"
+
+  - name: Run DBaasCLI dataguard prepareForStandby prereqs on primary DB
+    expect:
+      command: >
+        dbaascli dataguard prepareForStandby 
+        --db_name {{ db_name }}
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        --standbyScanIPAddresses {{ hostvars['localhost']['standby']['ScanIPAddresses'] }}
+        --standbyScanPort {{ hostvars['localhost']['standby']['ScanPort'] }}
+        --standbyDBDomain {{ hostvars['localhost']['standby']['DBDomain'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['ScanIPAddresses'] }}
+        --primaryScanPort {{ grid_config.scanListenerTCPPorts }}
+        --prereqs 
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: prepareForStandby_prereqs
+    failed_when: 
+      - "'dbaascli execution completed' not in prepareForStandby_prereqs.stdout"
+
+  - name: Fetch prepareForStandby_prereqs_files files
+    ansible.builtin.fetch:
+      src: "{{ prepareForStandby_prereqs.stdout | regex_findall(', the file (.+) needs to be copied') | first }}"
+      dest: "/tmp/"
+      flat: yes
+    when: 
+      - prepareForStandby_prereqs is success
+      - prepareForStandby_prereqs.stdout is defined
+
+  - name: Set prepareForStandby_prereqs_files fact
+    delegate_to: localhost
+    delegate_facts: true
+    when: prepareForStandby_prereqs is success
+    ansible.builtin.set_fact:
+      prepareForStandby_prereqs_files: "{{ prepareForStandby_prereqs.stdout | regex_findall(', the file (.+) needs to be copied') | first | basename }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI prepareForStandby_prereqs
+        -----------------
+        {{ prepareForStandby_prereqs.cmd }}
+        -----------------
+        {{ prepareForStandby_prereqs.stdout }} 
+        ==================================================
+    when: prepareForStandby_prereqs is not skipped
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+- name: DBaasCLI Block 
+  become: true
+  when: 
+    - database_config.db_role is defined
+    - hostvars['localhost']['standby'] is defined
+    - database_config.db_role == 'primary'
+    - system_config.dbaascli_on is true
+    - ansible_hostname in database_config.master_node
+    - "'prereqs' not in ansible_run_tags"
+  block:
+
+  - name: Run DBaasCLI dataguard getDetails on primary DB
+    command: >
+      dbaascli dataguard getDetails 
+      --db_name {{ db_name }}
+    register: dataguard_getDetails
+    failed_when: 
+      - dataguard_getDetails.rc != 0
+      - "'DBAAS-80035' not in dataguard_getDetails.stdout"
+      # [DBAAS-80035] The following database does not have Oracle Data Guard enabled
+
+  - name: Run DBaasCLI dataguard enableMultipleStandbySupport on primary DB
+    command: >
+      dbaascli dataguard enableMultipleStandbySupport 
+      --db_name {{ db_name }}
+    register: dataguard_enableMultipleStandbySupport
+    when: 
+      - dataguard_getDetails is success
+      - "'dbaascli execution completed' in dataguard_getDetails.stdout"
+
+  - name: Run DBaasCLI dataguard prepareForStandby on primary DB
+    expect:
+      command: >
+        dbaascli dataguard prepareForStandby 
+        --db_name {{ db_name }}
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        --standbyScanIPAddresses {{ hostvars['localhost']['standby']['ScanIPAddresses'] }}
+        --standbyScanPort {{ hostvars['localhost']['standby']['ScanPort'] }}
+        --standbyDBDomain {{ hostvars['localhost']['standby']['DBDomain'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['ScanIPAddresses'] }}
+        --primaryScanPort {{ grid_config.scanListenerTCPPorts }}
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: prepareForStandby
+    failed_when: 
+      - "'dbaascli execution completed' not in prepareForStandby.stdout"
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ prepareForStandby.stdout | regex_findall(', the file (.+) needs to be copied') | first }}"
+      dest: "/tmp/"
+      flat: yes
+    when: prepareForStandby is success
+
+  - name: Set prepareForStandby_files fact
+    delegate_to: localhost
+    delegate_facts: true
+    when: prepareForStandby is success
+    ansible.builtin.set_fact:
+      prepareForStandby_files: "{{ prepareForStandby.stdout | regex_findall(', the file (.+) needs to be copied') | first | basename }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI prepareForStandby
+        -----------------
+        {{ prepareForStandby.cmd }}
+        -----------------
+        {{ prepareForStandby.stdout }} 
+        ==================================================
+    when: prepareForStandby is not skipped
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

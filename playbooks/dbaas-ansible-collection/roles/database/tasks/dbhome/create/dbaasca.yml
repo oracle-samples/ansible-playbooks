@@ -1,0 +1,261 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Print Oracle Homes 
+  become: true
+  block:
+
+    - name: Install lxml 
+      pip: 
+        name: lxml 
+
+    - name: Read inventory.xml
+      community.general.xml:
+        path: "{{ oracle_facts.system.inventory_loc }}/ContentsXML/inventory.xml"
+        xpath: /INVENTORY/HOME_LIST/HOME
+        content: attribute
+      register: _inventory_xml
+
+    - name: Get database full version 
+      shell: "$ORACLE_HOME/bin/oraversion -compositeVersion"
+      become_user: oracle
+      environment:    
+        ORACLE_HOME: "{{ __oracle_home.LOC }}"
+      with_items: "{{ _inventory_xml.matches | map(attribute='HOME') }}"
+      loop_control:
+        loop_var: __oracle_home
+      when: __oracle_home.CRS is not defined 
+      register: _dbHome_opatch
+      
+    # - name: Get BUILD_LABEL
+    #   shell: |
+    #     grep 'use constant CATCONST_BUILD_LABEL' {{ __oracle_home }}/rdbms/admin/catconst.pm | awk -F"'" '{print $2 ",{{ __oracle_home }}"}'
+    #   with_items: "{{ _inventory_xml.matches | map(attribute='HOME') | map(attribute='LOC') }}"
+    #   loop_control:
+    #     loop_var: __oracle_home 
+    #   when: "'product' in __oracle_home"
+    #   register: _catconst_build_label  
+
+    - name: Write facts OracleHome_facts
+      ansible.builtin.set_fact:
+        cacheable: false
+        OracleHome_facts: "{{ OracleHome_facts | default({}) | combine(_OracleHome_facts | items2dict) }}"
+      when: 
+        - _dbHome_opatch.changed|bool
+        - __dbHome_lspatches.stdout is defined
+      vars:
+        _OracleHome_facts:
+          - key: "dbHome_{{ __dbHome_lspatches.__oracle_home.IDX }}" 
+            value:
+              homeName: "{{ __dbHome_lspatches.__oracle_home.NAME }}"
+              homePath: "{{ __dbHome_lspatches.__oracle_home.LOC }}"
+              version:  "{{ __dbHome_lspatches.stdout }}"
+              # version:  "{{ __dbHome_lspatches.stdout | regex_findall('Database Release Update : (.+) ') | first | split(' ') | first }}"
+      with_items: "{{ _dbHome_opatch.results }}"
+      loop_control:
+        loop_var: __dbHome_lspatches
+
+    - name: Write fact _dbHomeTargetVersion_list 
+      set_fact:
+        _dbHomeTarget_list: "{{ OracleHome_facts | to_json | from_json | json_query(dbHomeTarget_query) | sort(attribute='version',reverse=true) }}"
+      vars:
+        dbHomeTarget_query: "*.{version: version, homePath: homePath}"
+
+    - name: Write fact oracleHomePath
+      ansible.builtin.set_fact:
+        oracleHomePath: "{{ __dbHomeTargetPath_latest.homePath | default('There are no homes registered in the system') }}" 
+      vars:
+        __dbHomeTargetPath_latest: "{{ _dbHomeTarget_list | selectattr('version', 'search', version) | sort(attribute='version') | sort(attribute='homePath') | last }}"
+
+    - debug:
+        msg: "{{ output | split('\n') }}" 
+      vars:
+        output: | 
+          ==================================================
+          DBaasCA dbHome getDetails
+          -----------------
+            oracleHomePath:     {{ oracleHomePath }}
+          ==================================================
+      tags: [print_action]
+
+    # - name: Show BUILD_LABEL
+    #   debug:
+    #     msg: "{{ __oracle_home.LOC }}" 
+    #   with_items: "{{ _inventory_xml.matches | map(attribute='HOME') }}"
+    #   loop_control:
+    #     loop_var: __oracle_home 
+    #   when: __oracle_home.CRS is not defined 
+
+    # - name: Get BUILD_LABEL
+    #   shell: |
+    #     x=$(grep 'use constant CATCONST_BUILD_LABEL' {{ __oracle_home.LOC }}/rdbms/admin/catconst.pm | awk -F"'" '{print $2 ",{{ __oracle_home.LOC }}"}')
+    #     y={{ __oracle_home.NAME }}
+    #     echo $x $y | sed "s/ /,/g"
+    #   with_items: "{{ _inventory_xml.matches | map(attribute='HOME') }}"
+    #   loop_control:
+    #     loop_var: __oracle_home 
+    #   when:  __oracle_home.CRS is not defined  
+    #   register: _catconst_build_label
+
+    # - name: Show an attribute value
+    #   ansible.builtin.debug:
+    #     var: _catconst_build_label 
+    #   when: _catconst_build_label is defined
+
+    # - name: Write fact _dbHomeTargetVersion from _catconst_build_label
+    #   ansible.builtin.set_fact:
+    #     _dbHomeTargetVersion: "{{ item.0 }}" 
+    #     _dbHomeTargetLoc:     "{{ item.1 }}"
+    #     _dbHomeTargetName:    "{{ item.2 }}"
+    #   with_items: "{{ _catconst_build_label.stdout_lines | split(',') }}"
+    #   when: 
+    #     - version is defined
+    #     - _catconst_build_label is defined
+    #     - _version in item 
+
+    # - name: Read Home from inventory.xml
+    #   community.general.xml:
+    #     path: inventory.xml
+    #     xpath: /INVENTORY/HOME_LIST/HOME[@CRS='true']
+    #     content: attribute
+    #   register: _inventory_xml
+
+# - name: Check if Oracle is already installed
+#   shell: "grep {{ targetHome }} {{ inventory_loc }}/ContentsXML/inventory.xml | wc -l"
+#   register: stat_oracle
+
+# - name: Delete targetHome directory 
+#   file:
+#     path: "{{ targetHome }}"  
+#     state: absent
+#   when: 
+#     - stat_oracle.stdout|int == 0
+#     - "'force' in ansible_run_tags"
+
+# - name: DBaaSCA GIaaS download
+#   block:
+
+#   - name: Create directories
+#     file:
+#       path: "{{ item }}"
+#       state: directory
+#       mode: '0755'
+#       owner: oracle 
+#       group: oinstall
+#     loop: 
+#       - "{{ stage_dir }}"
+#     when: ansible_hostname == preferred_node
+
+#   - name: Find checksums of files on the server
+#     ansible.builtin.stat:
+#       path: "{{ stage_dir }}/{{ goldImage }}"
+#       checksum_algorithm: sha256
+#       get_checksum: yes
+#     register: remote_stat_checksum
+#     changed_when: false
+#     when: ansible_hostname == preferred_node
+
+#   - name: Download file with check (sha256)
+#     ansible.builtin.get_url:
+#       url: "{{ GIaaS_url }}" 
+#       dest: "{{ stage_dir }}" 
+#       checksum: "{{ GIaaS_checksum }}" 
+#       validate_certs: no
+#       mode: '0755'
+#       owner: oracle 
+#       group: oinstall
+#     environment:
+#       CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+#     when:
+#       - ansible_hostname == preferred_node 
+#       - remote_stat_checksum.stat.checksum|default('no_output') != GIaaS_checksum|split(':')|last
+
+#   become: true
+#   when: stat_oracle.stdout|int == 0
+
+# - name: DBaaSCA dbhome create 
+#   block:
+
+#   - name: Create directories
+#     file:
+#       path: "{{ item }}"
+#       state: directory
+#       mode: '0755'
+#       owner: oracle 
+#       group: oinstall
+#     loop: 
+#       - "{{ targetHome }}"
+#     when: ansible_hostname == preferred_node
+
+#   - name: Unarchive DB Files
+#     ansible.builtin.unarchive:
+#       src: "{{ stage_dir }}/{{ goldImage }}"
+#       dest: "{{ targetHome }}" 
+#       owner: oracle 
+#       group: oinstall
+#       remote_src: yes
+#     environment:
+#       CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+#     when: ansible_hostname == preferred_node
+
+#   - name: Install Oracle Database prereqs
+#     become_user: oracle
+#     shell: >
+#       {{ targetHome }}/runInstaller 
+#       -setupDBHome
+#       -silent 
+#       -responseFile {{ targetHome }}/install/response/db_install.rsp
+#       -INVENTORY_LOCATION {{ inventory_loc }} 
+#       -ORACLE_BASE {{ (inventory_loc | split('oraInventory') | first)[:-1] }}/oracle
+#       -OSDBA {{ inst_group }} 
+#       -OSOPER {{ inst_group }} 
+#       -OSBACKUPDBA {{ inst_group }} 
+#       -OSDGDBA {{ inst_group }} 
+#       -OSKMDBA {{ inst_group }} 
+#       -OSRACDBA {{ inst_group }} 
+#       -clusterNodes {{ cluster_nodes }}
+#       -prereqs
+#     register: db_home_install_prereqs
+#     when: ansible_hostname == preferred_node
+#     failed_when: 
+#       - "'Prerequisite checks ran successfully.' not in db_home_install_prereqs.stdout"
+#       - (db_home_install_prereqs.rc != 0) or db_home_install_prereqs.rc != 6
+
+#   - name: Install Oracle Database 
+#     become_user: oracle
+#     shell: >
+#       {{ targetHome }}/runInstaller 
+#       -setupDBHome
+#       -silent 
+#       -responseFile {{ targetHome }}/install/response/db_install.rsp
+#       -INVENTORY_LOCATION {{ inventory_loc }} 
+#       -ORACLE_BASE {{ (inventory_loc | split('oraInventory') | first)[:-1] }}/oracle
+#       -OSDBA {{ inst_group }} 
+#       -OSOPER {{ inst_group }} 
+#       -OSBACKUPDBA {{ inst_group }} 
+#       -OSDGDBA {{ inst_group }} 
+#       -OSKMDBA {{ inst_group }} 
+#       -OSRACDBA {{ inst_group }} 
+#       -clusterNodes {{ cluster_nodes }}
+#     register: db_home_install
+#     when: 
+#       - ansible_hostname == preferred_node
+#       - "'Prerequisite checks ran successfully.' in db_home_install_prereqs.stdout"
+#     failed_when: 
+#       - "'Successfully Setup Software' not in db_home_install.stdout"
+#       - (db_home_install.rc != 0) or db_home_install.rc != 6
+
+#   - name: Run DB orainstRoot.sh 
+#     command: "{{ targetHome }}/root.sh"
+
+#   become: true
+#   when: stat_oracle.stdout|int == 0

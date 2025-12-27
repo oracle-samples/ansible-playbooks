@@ -1,0 +1,19 @@
+#SPDX-License-Identifier: MIT-0
+galaxy_info:
+  role_name: oracle_facts
+  author: Sebastian Alasino
+  description: Gather Ansible Facts from Oracle Grid and Database
+  company: Oracle 
+
+  license: license (MIT)
+
+  min_ansible_version: 2.18.0
+
+  galaxy_tags: 
+    - oracle
+    - database 
+
+dependencies: []
+
+collections:
+  - community.general

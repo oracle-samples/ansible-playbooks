@@ -1,0 +1,50 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaS PreReqs System 
+  block:
+  
+  - name: Configure SSH Equivalence
+    import_tasks: ssh_equivalence.yml
+    when: 
+      - ssh_equivalence | default(false)
+
+  - name: Create Database env file 
+    become: true
+    become_user: "{{ oracle_user }}" 
+    blockinfile:
+      dest: ~/{{ database_config.db_name }}.env
+      create: true
+      block: |
+        ORACLE_HOME={{ database_config.oracle_home }}; export ORACLE_HOME
+        ORACLE_BASE={{ database_config.oracle_base }}; export ORACLE_BASE
+        PATH=$PATH:{{ database_config.oracle_home }}/bin:{{ database_config.oracle_home }}/OPatch; export PATH 
+        LD_LIBRARY_PATH={{ database_config.oracle_home }}/lib; export LD_LIBRARY_PATH 
+        ORACLE_UNQNAME={{ database_config.db_unique_name }}; export ORACLE_UNQNAME
+        ORACLE_SID={{ database_config.instance_name }}; export ORACLE_SID
+        TNS_ADMIN={{ database_config.oracle_home }}/network/admin/{{ database_config.db_name }}; export TNS_ADMIN
+    when: 
+      - db_env_file | default(false)
+      - database_config.db_role is defined 
+
+  - name: Install DBaasCA 
+    import_tasks: dbaasca_install.yml
+    when: 
+      - dbaasca_install | default(false)
+
+  - name: Configure dbaas_acfs 
+    import_tasks: dbaas_acfs.yml
+    when: 
+      - dbaas_acfs | default(false)
+      - oracle_facts.system.crs_on
+
+...

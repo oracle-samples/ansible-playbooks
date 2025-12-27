@@ -1,0 +1,36 @@
+---
+
+# dbservers
+
+cdb_service_name: "{{ oracle_facts[db_name].dbNodeLevelDetails[ansible_hostname].cdb_service_name }}"
+
+# @var _db_unique_name_for_pdb:description: >
+# The variable is internal used only.
+#
+# Do not set it in inventory!
+#
+# get db_unique_name from CDB for current pdb
+# Requires `opdb` as `loop_var`.
+# @end
+# @var _db_unique_name_for_pdb: $ "_internal_used_"
+# _db_unique_name_for_pdb: >-
+#   {{ (db_name
+#     | selectattr('oracle_db_name', 'equalto', _opdb_loop_helper['cdb'])
+#     | map(attribute='oracle_db_unique_name', default=_opdb_loop_helper['cdb']))[0]
+#   }}
+
+# Defaults
+
+# primary_node: "{{ vars[db_name + '_primary_node'] }}"
+# standby_node: "{{ vars[db_name + '_standby_node'] }}"
+# db_ezconnect: "sys/{{ db_sys_password }}@{{ grid_config.scan_name }}:{{ grid_config.scanListenerTCPPorts }}/{{ database_config.db_unique_name }}.{{ database_config.dbDomain }} as sysdba"
+pdb_name: "{{ db_name|upper }}P{{ pdbNumber | default(1) }}"
+
+# Oracle database list 
+#
+db_name_list: "{{ database_list | split(',') }}"
+
+# DB Passwords
+db_sys_user: sys
+db_tde_password: "{{ db_sys_password }}" 
+awr_admin_password: "{{ db_sys_password }}" 

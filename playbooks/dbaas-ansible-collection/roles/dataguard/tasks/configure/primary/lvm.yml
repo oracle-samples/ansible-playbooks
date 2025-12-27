@@ -1,0 +1,89 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: LVM Block 
+  become: true
+  ignore_errors: true
+  block:
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Execute SQL command 
+    shell: |
+      {{ database_config.homePath }}/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF" -nologintime "/ as sysdba" << EOF 
+      set heading OFF
+      set feedback OFF
+      {{ item.sql }} 
+      exit
+      EOF
+    become: true
+    become_user: "{{ oracle_user }}" 
+    become_flags: "--login"
+    vars:
+      ansible_shell_allow_world_readable_temp: true
+    environment: "{{ oracle_env }}"
+    register: sql_command_output
+    with_items:
+      - { query: 'max_bytes' , sql: 'select max(bytes) max_bytes from v\$log;' }
+      - { query: 'max_group' , sql: 'select max(group#) max_group from v\$log;' }
+      - { query: 'number_logs' , sql: 'select count(*) number_logs from v\$log;' }
+      - { query: 'max_standby_group' , sql: 'select max(group#) max_standby_group from v\$standby_log;' }
+      - { query: 'number_standby_logs' , sql: 'select count(*) number_standby_logs from v\$standby_log;' }
+
+  - name: Generate location_quoted
+    set_fact:
+      location_quoted: |
+        {% set g = namespace(comm0 = '', comma = '') -%}
+
+        {# Header #}
+        {%- for item in sql_command_output.results -%}
+          {{ item.item.query }}{{ "," if not loop.last }}
+        {%- endfor %}
+
+        {# Rows #}
+        {%- for item in sql_command_output.results -%}
+          {{ item.stdout }}{{ "," if not loop.last }}
+        {%- endfor %}
+    # {% for item in sql_command_output.results %}
+    # {{ item.item.query }}{{ "," if not loop.last }}
+    # {{ item.stdout_lines | first }}{{ "," if not loop.last }}
+    # {% endfor %}
+
+  - name: Parse a CSV file's contents
+    ansible.builtin.debug:
+      msg: >-
+        {{ location_quoted | community.general.from_csv | map(attribute='number_logs') }}
+
+  - name: Parse a CSV file's contents
+    ansible.builtin.debug:
+      msg: >-
+        {{ location_quoted | community.general.from_csv | map(attribute='number_logs') | flatten }}
+
+  # - name: Fetch prepareForStandby files
+  #   ansible.builtin.fetch:
+  #     src: "{{ hostvars['localhost']['prepareForStandby_files'] }}"
+  #     dest: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.zip"
+  #     flat: yes
+  #   when: prepareForStandby is success
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

@@ -1,0 +1,54 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCLI grid getDetails 
+  become: true
+  shell: "dbaascli grid getDetails --showOutputDelimiter | sed -n '/Start of output/, /End of output/{ /Start of output/! { /End of output/! p }}'" 
+  register: _dbaascli_grid_getDetails
+
+# - name: Write facts from _dbaascli_grid_getDetails
+#   ansible.builtin.set_fact:
+#     cacheable: false
+#     grid_facts: "{{ _dbaascli_grid_getDetails.stdout }}"
+#   when: _dbaascli_grid_getDetails.rc == 0
+
+- name: Write facts from _dbaascli_grid_getDetails
+  ansible.builtin.set_fact:
+    cacheable: false
+    oracle_facts: "{{ oracle_facts | default({}) | combine(_grid | items2dict) }}"
+  when: _dbaascli_grid_getDetails.rc == 0 
+  vars:
+    _grid:
+      - key: grid 
+        value: "{{ _dbaascli_grid_getDetails.stdout }}"
+
+- debug:
+    msg: "{{ output | split('\n') }}" 
+  vars:
+    output: | 
+      ==================================================
+      DBaaS Oracle Gird Facts
+      -----------------
+      activeVersion: {{ oracle_facts.grid | json_query('activeVersion') }}
+      state: {{ oracle_facts.grid | json_query('state') }}
+      scan_name: {{ oracle_facts.system.scan_name }}
+      scan_ips: {{ oracle_facts.system.scan_ips }}
+      giNodeLevelDetails: 
+        nodeName: {{ oracle_facts.grid | json_query('giNodeLevelDetails.*.nodeName') | join(',') }}
+        homePath: {{ oracle_facts.grid | json_query('giNodeLevelDetails.*.homePath') | unique() | join(',') }}
+        version: {{ oracle_facts.grid | json_query('giNodeLevelDetails.*.version') | unique() | join(',') }}
+      ==================================================
+  when:
+    - ansible_hostname in grid_config.master_node
+    - oracle_facts is defined
+  
+...

@@ -1,0 +1,8 @@
+---
+# defaults file for oracle_facts
+
+oracle_fact_system_ignore_failed: false
+_dbHomeTargetExists: false
+_ggHomeTargetExists: false
+
+...

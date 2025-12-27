@@ -1,0 +1,143 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: lvm 
+  import_tasks: lvm.yml 
+  when: not oracle_facts.system.crs_on
+
+- name: crs 
+  import_tasks: crs.yml 
+  when: oracle_facts.system.crs_on
+
+- name: database  
+  become: true
+  become_user: "{{ oracle_user }}" 
+  become_flags: "--login"
+  when: ((oracle_env_crs is defined) or (oracle_env_lvm is defined))
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+    oracle_env_fact: "{{ oracle_facts.system.crs_on | ternary(oracle_env_crs, oracle_env_lvm) }}"
+    oracle_home: "{{ oracle_facts.system.crs_on | ternary(oracle_home_crs, oracle_home_lvm) }}"
+    oracle_sid: "{{ oracle_facts.system.crs_on | ternary(oracle_sid_crs, oracle_sid_lvm) }}"
+  block:
+
+  - name: Discover database parameters 
+    sqlplus:
+      oracle_home: "{{ oracle_home }}"
+      oracle_sid: "{{ oracle_sid }}"
+      query: "{{ sql_db_parameters }}"
+    register: db_parameter_sqlplus_result
+
+  - name: Generate db_parameter_csv
+    set_fact:
+      db_parameter_sqlplus: |
+        {%- for item in db_parameter_sqlplus_result.results -%}
+          {{ item }}
+        {% endfor %}
+    when: db_parameter_sqlplus_result.results is defined
+
+  # - name: Select from v$database 
+  #   shell: |
+  #     $ORACLE_HOME/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF" -nologintime "/ as sysdba" << EOF 
+  #     select open_mode,flashback_on,database_role,DATAGUARD_BROKER,GUARD_STATUS,FORCE_LOGGING from v$database;
+  #     exit
+  #     EOF
+  #   environment: "{{ oracle_env_fact }}"
+  #   when: 
+  #     - _oratab_file_found.stat.exists
+  #     - smon_running.pids | length > 0
+  #   register: _v_database_ouput
+  #   failed_when: 
+  #     # ORA-01034: ORACLE not available
+  #     - _v_database_ouput.rc != 0 
+  #     - "'ORA-01034' not in _v_database_ouput.stdout"
+
+  - name: Discover database options 
+    sqlplus:
+      oracle_home: "{{ oracle_home }}"
+      oracle_sid: "{{ oracle_sid }}"
+      query: "{{ sql_db_options }}" 
+    register: db_options_sqlplus_result
+
+  - name: Generate db_options_csv
+    set_fact:
+      db_options_sqlplus: |
+        {%- for item in db_options_sqlplus_result.results -%}
+          {{ item | lower }}
+        {% endfor %}
+    when: db_options_sqlplus_result.results is defined
+
+  - name: Get oraversion full version 
+    shell: |
+      {{ oracle_home }}/bin/oraversion -compositeVersion
+    register: _oraversion
+
+  - name: Discover database instances 
+    sqlplus:
+      oracle_home: "{{ oracle_home }}"
+      oracle_sid: "{{ oracle_sid }}"
+      query: "select * from gv$instance;"
+    register: instances_sqlplus_result
+
+  - name: Generate instance_options_csv
+    set_fact:
+      instance_options_sqlplus: |
+        {%- for item in instances_sqlplus_result.results -%}
+          {{ item | lower }}
+        {% endfor %}
+    when: instances_sqlplus_result.results is defined
+
+  - name: Write facts to database_facts
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_db_facts | items2dict) }}"
+    vars:
+      _db_facts:
+        - key: "{{ db_parameter_sqlplus | regex_findall('db_name,(.*)') | join  }}" 
+          value:
+            db_name:              "{{ db_parameter_sqlplus | regex_findall('db_name,(.*)') | join }}"
+            db_unique_name:       "{{ db_parameter_sqlplus | regex_findall('db_unique_name,(.*)') | join }}"
+            instance_name:        "{{ db_parameter_sqlplus | regex_findall('instance_name,(.*)') | join }}"
+            oracle_home:          "{{ oracle_home }}"
+            db_role:              "{{ db_options_sqlplus | community.general.from_csv | map(attribute='database_role') | join | replace(' ','_') }}"
+            db_domain:            "{{ db_parameter_sqlplus | regex_findall('db_domain,(.*)') | join }}"
+            db_type:              "{{ instance_options_sqlplus | community.general.from_csv | map(attribute='database_type') | unique | join }}" 
+            oracle_home_version:  "{{ _oraversion.stdout }}" 
+            open_mode:            "{{ db_options_sqlplus | community.general.from_csv | map(attribute='database_role') | join | replace(' ','_') }}"
+            flashback_on:         "{% if (db_options_sqlplus | community.general.from_csv | map(attribute='flashback_on') | join) == 'yes' %}{{ true|bool}}{% else %}{{ false|bool}}{% endif %}"
+            force_logging_on:     "{% if (db_options_sqlplus | community.general.from_csv | map(attribute='force_logging') | join) == 'yes' %}{{ true|bool}}{% else %}{{ false|bool}}{% endif %}"
+            dg_on:                "{% if (db_options_sqlplus | community.general.from_csv | map(attribute='dataguard_broker') | join) == 'enabled' %}{{ true|bool}}{% else %}{{ false|bool}}{% endif %}"
+            master_node:          "{{ (instance_options_sqlplus | community.general.from_csv | map(attribute='host_name')) | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname')) | sort | first }}" 
+            configured_nodes:     "{{ instance_options_sqlplus | community.general.from_csv | map(attribute='host_name') | sort | join(',') }}" 
+            tde_on:               "{% if (db_parameter_sqlplus | regex_findall('wallet_root,(.*)') | first) | length > 0 %}{{ true| bool}}{% else %}{{ false| bool}}{% endif %}"
+            wallet_root:          "{{ db_parameter_sqlplus | regex_findall('wallet_root,(.*)') | first }}"
+            processes:            "{{ db_parameter_sqlplus | regex_findall('processes,(.*)') | first }}"
+            sga_target:           "{{ db_parameter_sqlplus | regex_findall('sga_target,(.*)') | first }}"
+            pga_aggregate_target: "{{ db_parameter_sqlplus | regex_findall('pga_aggregate_target,(.*)') | first }}"
+            db_recovery_file_dest_size: "{{ db_parameter_sqlplus | regex_findall('db_recovery_file_dest_size,(.*)') | first }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Oracle oracle_facts
+        -----------------
+        "{{ oracle_facts | community.general.json_query(db_name) }}"
+        ==================================================
+    when: 
+      - oracle_facts is defined
+      - ansible_hostname in database_config.master_node
+    tags: [print_action]
+    ignore_errors: true
+
+...

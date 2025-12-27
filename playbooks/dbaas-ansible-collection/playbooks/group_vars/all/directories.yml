@@ -1,0 +1,20 @@
+# Stage directory
+#
+ansible_base_control: /scratch/salasino/ansible
+ansible_base_managed: /u01/ansible 
+stage_dir:
+    control:
+        base: "{{ ansible_base_control }}"
+        software: "{{ ansible_base_control }}/software" 
+        app: "{{ ansible_base_control }}/app" 
+        tmp: "{{ ansible_base_control }}/tmp"
+        # workdir: "{{ ansible_base_control }}/logs/{{ ansible_limit }}/{{ time_stamp_start }}_{{ use_case }}"
+    managed:
+        base: "{{ ansible_base_managed }}"
+        software: "{{ ansible_base_managed }}/software" 
+        app: "{{ ansible_base_managed }}/app" 
+        tmp: "{{ ansible_base_managed }}/tmp"
+        # workdir: "{{ ansible_base_managed }}/logs/{{ ansible_limit }}/{{ time_stamp_start }}_{{ use_case }}"
+
+# DBaaS Tools
+reg_tmp_files: /var/opt/oracle/log/reg_tmp_files

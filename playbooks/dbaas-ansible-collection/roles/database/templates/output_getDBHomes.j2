@@ -1,0 +1,14 @@
+==================================================
+DBaasCLI system getDBHomes 
+{% for host in ansible_play_hosts %}
+{% if hostvars[host]['_oracleHomeVersion'] == 'no_oracle_home_found' %}
+There are no homes version {{ version }} registered in the system.
+{% else %}
+-----------------
+  Hostname:           {{ inventory_hostname }}
+  oracleHomeName:     {{ hostvars[host]['_oracleHomeName'] }}
+  oracleHomeVersion:  {{ hostvars[host]['_oracleHomeVersion'] }} 
+  oracleHomePath:     {{ hostvars[host]['_oracleHomePath'] }}
+{% endif %}
+{% endfor %}
+==================================================

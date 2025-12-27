@@ -1,0 +1,38 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Get stats_pack_snap
+  shell: |
+    set timeout 30
+    {{ oracle_home }}/bin/sqlplus -s "/ as sysdba" <<EOF
+    set serveroutput off
+    set heading off
+    set feedback off
+    set pages 0
+    variable snap number ;
+    begin :snap := dbms_workload_repository.create_snapshot (); end;
+    /
+    print snap
+    exit
+    EOF
+  register: stats_pack_snap
+  ignore_errors: true
+  become: true
+  become_user: oracle 
+  become_flags: "--login"
+  environment: "{{ oracle_env }}" 
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+    db_name: "{{ db_name_outer }}"
+  when:
+    - "'stats' in ansible_run_tags"
+    - db_role is defined

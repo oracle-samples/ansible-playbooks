@@ -1,0 +1,35 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: database create 
+  tags: database_create 
+  when: 
+    - oracleHomeName is defined
+    - targetHome is true
+    - not database_config.db_role
+    - ansible_hostname in hostname_target
+  block:
+  
+  - name: database create dbaasca
+    ansible.builtin.include_tasks: dbaasca.yml
+    when: not system_config.dbaascli_on
+
+  - name: database create dbaascli
+    ansible.builtin.include_tasks: dbaascli.yml
+    when: system_config.dbaascli_on
+    
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

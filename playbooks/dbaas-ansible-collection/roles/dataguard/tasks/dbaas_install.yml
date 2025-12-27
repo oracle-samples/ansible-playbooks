@@ -1,0 +1,4 @@
+- name: DBaaS Prereqs 
+  ansible.builtin.import_role: 
+    name: dbaas_prereqs 
+  when: not system_config.dbaascli_on

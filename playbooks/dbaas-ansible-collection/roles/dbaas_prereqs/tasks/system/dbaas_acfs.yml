@@ -1,0 +1,42 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaS ACFS configure
+  become: true
+  when: system_config.dbaascli_on is not true
+  block:
+
+  - name: Find asm.volume.mountpath file 
+    stat:
+      path: "{{ asm.volume.mountpath }}"
+    register: asm_volume_mountpath_stat
+
+  - name: Create dbaas_acfs directory
+    file:
+      path: "{{ asm.volume.mountpath }}/dbaas_acfs"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    when: asm_volume_mountpath_stat.stat.exists
+    register: create_dbaas_acfs_directory
+
+  - name: Create dbaas_acfs directory
+    file:
+      src: "{{ asm.volume.mountpath }}/dbaas_acfs"
+      dest: /var/opt/oracle/dbaas_acfs 
+      state: link
+      owner: root 
+      group: root 
+    when: create_dbaas_acfs_directory is success
+
+...

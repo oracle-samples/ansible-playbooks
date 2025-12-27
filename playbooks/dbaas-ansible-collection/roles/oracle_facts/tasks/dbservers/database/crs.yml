@@ -1,0 +1,76 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: crs  
+  become: true
+  become_user: "{{ grid_user }}" 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+    _db_unique_name: "{{ srvctl_config_database_output.stdout | regex_search(db_name + '(.+)') }}"
+    _oracle_home: "{{ srvctl_config_database_home_output.stdout | regex_findall(_db_unique_name + ' (.*)') | join(',') }}"
+  block:
+
+  - name: Getting process IDs of SMON 
+    community.general.pids:
+      pattern: "ora_smon_{{ db_name }}.*"
+    register: smon_running
+  
+  - name: Discover database DB_UNIQUE_NAME
+    shell: "{{ oracle_facts.system.grid_home }}/bin/srvctl config database"
+    register: srvctl_config_database_output 
+    when: smon_running.pids | length > 0
+    environment: "{{ grid_env }}"
+  
+  - name: Discover database oracle_home  
+    shell: "{{ oracle_facts.system.grid_home }}/bin/srvctl config database -home | awk '{ print $1,$2 }'"
+    register: srvctl_config_database_home_output
+    when: 
+      - _db_unique_name is defined
+      - _db_unique_name | length > 0
+    become: true
+    environment: "{{ grid_env }}"
+
+  # - name: Discover database config 
+  #   shell: "{{ _oracle_home }}/bin/srvctl config database -db {{ _db_unique_name }}"
+  #   when: 
+  #     - _db_unique_name is defined
+  #     - _db_unique_name | length > 0
+  #     - _oracle_home | length > 0
+  #   register: srvctl_config_database_parameters
+  
+  - name: srvctl status instance 
+    shell: "{{ _oracle_home }}/bin/srvctl status instance -db {{ _db_unique_name }} -node {{ ansible_hostname }}" 
+    when: 
+      - _db_unique_name is defined
+      - _db_unique_name | length > 0
+      - _oracle_home | length > 0
+    register: srvctl_status_instnace_output
+
+  - name: Generate oracle_env_crs
+    set_fact:
+      oracle_env_crs: |
+        ORACLE_HOME: {{ _oracle_home }}
+        PATH: $PATH:{{ _oracle_home }}/bin
+        LD_LIBRARY_PATH: {{ _oracle_home }}/lib
+        ORACLE_SID: {{ srvctl_status_instnace_output | ternary(srvctl_status_instnace_output.stdout | regex_findall('Instance (.*) is running on node') | join(','), 'not_found') }}
+        # 'ORACLE_SID': {{ srvctl_status_instnace_output.stdout | regex_findall('Instance (.*) is running on node') | join(',') }} 
+      oracle_home_crs: "{{ _oracle_home }}"
+      oracle_sid_crs: "{{ srvctl_status_instnace_output | ternary(srvctl_status_instnace_output.stdout | regex_findall('Instance (.*) is running on node') | join(','), 'not_found') }}"
+      # master_node_crs: "{{ (srvctl_config_database_parameters.stdout | regex_findall('Configured nodes: (.*)')) | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname')) | sort | first }}"
+    when: 
+      - smon_running.pids | length > 0
+      - srvctl_config_database_output.changed
+      - srvctl_config_database_home_output.changed
+      - srvctl_status_instnace_output.changed
+
+...

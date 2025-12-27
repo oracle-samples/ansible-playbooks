@@ -1,0 +1,125 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCA configureStandby Block
+  become: true
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote shared_dir 
+    file:
+      path: "{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: 
+      - "{{ acfs_mount_point }}/{{ db_name }}"
+      - "{{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['db_unique_name'] }}"
+      - /var/opt/oracle/log/reg_tmp_files
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      src: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.zip"
+      dest: /var/opt/oracle/log/reg_tmp_files/ 
+      owner: oracle 
+      group: oinstall 
+      mode: 0644
+    register: copy_prepareForStandby_blob_file
+
+  - name: Run DBaasCA configureStandby 
+    expect:
+      command: >
+        {{ dbaasca }} 
+        -silent
+        -createDuplicateDB
+        -createAsStandby
+        -configureStandby
+        -useActiveDatabaseDuplication false
+        -useOMF true
+        -adminManaged
+        {% if hostvars['localhost']['primary']['db_type'] == 'rac' %}
+        -standbyScanName {{ hostvars['localhost']['standby']['scan_ip_addresses'] }} 
+        -standbyScanPort {{ hostvars['localhost']['standby']['scan_port'] }}
+        -nodelist {{ grid_config.cluster_nodes }} 
+        -honorNodeNumberToThread 
+        -honorNodeNumberForInstance
+        -configureActiveDG
+        -dgTNSNamesoraFilePath {{ acfs_mount_point }}/{{ db_name }}/tnsnames.ora
+        -storageType ASM
+        -datafileDestination +{{ asm.diskgroup.data }}
+        -recoveryAreaDestination +{{ asm.diskgroup.reco }}
+        -usedb_nameInPDBAlias
+        -initParams 'db_create_online_log_dest_1=+{{ asm.diskgroup.data }},os_authent_prefix="",processes={{ hostvars['localhost']['primary']['processes'] }},db_name={{ db_name }},pga_aggregate_target={{ hostvars['localhost']['primary']['pga_aggregate_target'] }},sga_target={{ hostvars['localhost']['primary']['sga_target'] }},db_domain={{ hostvars['localhost']['standby']['db_domain'] }},db_unique_name={% if hostvars['localhost']['primary']['db_type'] %}{{ hostvars['localhost']['standby']['db_unique_name'] }}{% else %}{{ hostvars['localhost']['standby']['instance_name'] }}{% endif %}'
+        {% else %}
+        -standbyHostName {{ hostvars['localhost']['standby']['scan_ip_addresses'] }} 
+        -standbyListenerPort {{ hostvars['localhost']['standby']['scan_port'] }}
+        -dgTNSNamesoraFilePath {{ acfs_mount_point }}/{{ db_name }}/tnsnames.ora
+        -storageType FS
+        -datafileDestination {{ asm.diskgroup.data }}
+        -recoveryAreaDestination {{ asm.diskgroup.reco }}
+        -initParams 'db_create_online_log_dest_1={{ asm.diskgroup.data }},os_authent_prefix="",processes={{ hostvars['localhost']['primary']['processes'] }},db_name={{ db_name }},pga_aggregate_target={{ hostvars['localhost']['primary']['pga_aggregate_target'] }},sga_target={{ hostvars['localhost']['primary']['sga_target'] }},db_domain={{ hostvars['localhost']['standby']['db_domain'] }},db_unique_name={% if hostvars['localhost']['primary']['db_type'] %}{{ hostvars['localhost']['standby']['db_unique_name'] }}{% else %}{{ hostvars['localhost']['standby']['instance_name'] }}{% endif %}'
+        -automaticMemoryManagement false 
+        -listeners LISTENER
+        {% endif %}
+        -gdb_name {{ db_name }}
+        -sid {{ db_name }}
+        -remoteDBConnString {{ hostvars['localhost']['primary']['scan_ip_addresses'] | split(',') | first }}:{{ hostvars['localhost']['primary']['scan_port'] }}/{{ hostvars['localhost']['primary']['db_unique_name'] }}.{{ hostvars['localhost']['primary']['db_domain'] }}
+        -dgProtectionMode MAX_PERFORMANCE
+        -standbyTransportMode ASYNC
+        -standbyBlobFileLocFromPrimaryDB /var/opt/oracle/log/reg_tmp_files/prepareForStandby_{{ db_name }}.zip
+        -recoveryAreaSize {{ hostvars['localhost']['primary']['db_recovery_file_dest_size'] | int | human_readable(unit='M') | split('.') | first }}
+        -databaseConfigType {{ hostvars['localhost']['primary']['db_type'] }}
+        -enableArchive true
+        -configureTDE true
+        -tdeWalletRoot {{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['db_unique_name'] }}
+        -primaryDBTdeWallet {{ hostvars['localhost']['primary']['wallet_root'] }}
+        -skipPasswordComplexityCheck true
+        -J-Dapplication.exceptions.severity=DBT-06012:WARNING,DBT-06604:WARNING,DBT-16008:WARNING
+        -J-Doracle.assistants.dbca.useStandardLogLocation=true
+        -jreLoc /usr/java/jdk-11
+      responses:
+        (?i)password: "{{ db_sys_password }}"
+      timeout: 3600 
+    become_user: oracle 
+    register: dbca_configureStandby 
+    ignore_errors: yes
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA configureStandby 
+        -----------------
+        {{ dbca_configureStandby.cmd }} 
+        -----------------
+        {{ dbca_configureStandby.stdout }} 
+        ==================================================
+    # failed_when: 
+    #   - ('FATAL' in dbca_configureStandby.stdout) or ('FAILED' in dbca_configureStandby.stdout))
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

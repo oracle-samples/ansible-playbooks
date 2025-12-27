@@ -1,0 +1,163 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: LVM  
+  become: true
+  become_user: oracle 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+    _oracle_env:
+      ORACLE_HOME: "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}"
+      PATH: "$PATH:{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1]}}/bin"
+      LD_LIBRARY_PATH: "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}/lib"
+      ORACLE_SID: "{{ _oratab_file.content | b64decode | regex_search(db_name+':') | replace(':','') }}"
+  block:
+
+  - name: Find /etc/oratab
+    stat: 
+      path: /etc/oratab
+    register: _oratab_file_found
+
+  - name: Reading /etc/oratab
+    slurp:
+      src: /etc/oratab
+    register: _oratab_file
+    when: _oratab_file_found.stat.exists
+
+  - name: Getting process IDs of SMON 
+    community.general.pids:
+      name: "ora_smon_{{ _oratab_file.content | b64decode | regex_search(db_name+':') | replace(':','') }}"
+    register: smon_pids
+
+  # - name: Discover database parameters 
+  #   shell: |
+  #     $ORACLE_HOME/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF DELIMITER :" -nologintime "/ as sysdba" << EOF 
+  #     select name,value
+  #     from v\$parameter
+  #     where name in ('cluster_database_instances','instance_name','db_domain','db_unique_name','processes','pga_aggregate_target','sga_target','db_recovery_file_dest_size','wallet_root');
+  #     exit
+  #     EOF
+  #   environment: "{{ _oracle_env }}"
+  #   when: 
+  #     - _oratab_file_found.stat.exists
+  #     - smon_pids.pids | length > 0
+  #   register: _database_parameters
+  #   failed_when: 
+  #     # ORA-01034: ORACLE not available
+  #     - _database_parameters.rc != 0 
+  #     - "'ORA-01034' not in _database_parameters.stdout"
+
+  - name: Discover database parameters 
+    sqlplus:
+      query: "{{ sql_parameters }}" 
+    environment: "{{ _oracle_env }}"
+    when: 
+      - _oratab_file_found.stat.exists
+      - smon_pids.pids | length > 0
+    register: db_parameter_sqlplus_result
+    # failed_when: 
+    #   # ORA-01034: ORACLE not available
+    #   - _database_parameters.rc != 0 
+    #   - "'ORA-01034' not in _database_parameters.stdout"
+
+  - name: Generate db_parameter_csv
+    set_fact:
+      db_parameter_sqlplus: |
+        {%- for item in db_parameter_sqlplus_result.results -%}
+          {{ item }}
+        {% endfor %}
+    when: db_parameter_sqlplus_result.results is defined
+
+  - name: Select from v$database 
+    shell: |
+      $ORACLE_HOME/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF" -nologintime "/ as sysdba" << EOF 
+      select open_mode,flashback_on,database_role,DATAGUARD_BROKER,GUARD_STATUS,FORCE_LOGGING from v\$database;
+      exit
+      EOF
+    environment: "{{ _oracle_env }}"
+    when: 
+      - _oratab_file_found.stat.exists
+      - smon_pids.pids | length > 0
+    register: _v_database_ouput
+    failed_when: 
+      # ORA-01034: ORACLE not available
+      - _v_database_ouput.rc != 0 
+      - "'ORA-01034' not in _v_database_ouput.stdout"
+
+  - name: Get oraversion full version 
+    shell: |
+      $ORACLE_HOME/bin/oraversion -compositeVersion
+    when: _oratab_file_found.stat.exists
+    register: _oraversion
+
+  - name: Write facts to database_facts
+    ansible.builtin.set_fact:
+      cacheable: false
+      database_facts: "{{ database_facts | default({}) | combine(_db_facts | items2dict) }}"
+    when: smon_pids.pids | length > 0
+    vars:
+      _db_facts:
+        - key: "{{ db_name }}" 
+          value:
+            db_name:               "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[0] }}"
+            homePath:             "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}"
+            dbUniqueName:         "{{ db_parameter_sqlplus | regex_findall('db_unique_name,(.*)') | first }}"
+            db_role:               "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('DATABASE_ROLE') | default('') | replace(' ','_') }}"
+            dbDomain:             "{{ db_parameter_sqlplus | regex_findall('db_domain,(.*)') | first }}"
+            dbType:               "{% if (db_parameter_sqlplus | regex_findall('cluster_database_instances,(.*)') | first | int) == 1 %}SI{% else %}NA{% endif %}"
+            patchVersion:         "{{ _oraversion.stdout }}" 
+            openMode:             "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('OPEN_MODE') | default('') | replace(' ','_') }}"
+            flashbackMode:        "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('FLASHBACK_ON') | default('NO') }}"
+            forceLogging:         "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('FORCE_LOGGING') | default('NO') }}"
+            dgEnabled:            "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('DATAGUARD_BROKER') | default('DISABLED') }}"
+            master_node:          "{{ ansible_hostname }}"
+            tdeDetails:
+              walletRootEnabled:  "{% if (db_parameter_sqlplus | regex_findall('wallet_root,(.*)') | first) | length > 0 %}TRUE{% else %}FALSE{% endif %}"
+              walletLocation:     "{{ db_parameter_sqlplus | regex_findall('wallet_root,(.*)') | first }}"
+            dbNodeLevelDetails:
+              homePath:           "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}"
+              patchVersion:       "{{ _oraversion.stdout }}" 
+              instanceName:       "{{ db_parameter_sqlplus | regex_findall('instance_name,(.*)') | first }}"
+              openMode:           "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('OPEN_MODE') | replace(' ','_') }}"
+            register: _database_facts
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaaS Oracle Database Facts
+        -----------------
+        dbUniqueName: {{ database_facts[db_name].dbUniqueName }}
+        db_role: {{ database_facts[db_name].db_role }}
+        dbType: {{ database_facts[db_name].dbType }}
+        homePath: {{ database_facts[db_name].homePath }}
+        flashbackMode: {{ database_facts[db_name].flashbackMode }}
+        forceLogging: {{ database_facts[db_name].forceLogging }}
+        openMode: {{ database_facts[db_name].openMode }}
+        dgEnabled: {{ database_facts[db_name].dgEnabled }}
+        master_node: {{ database_facts[db_name].master_node }}
+        tdeDetails:
+          walletRootEnabled: {{ database_facts[db_name].tdeDetails.walletRootEnabled }}  
+          walletLocation: {{ database_facts[db_name].tdeDetails.walletLocation }}  
+        dbNodeLevelDetails:
+          instanceName: {{ database_facts[db_name].dbNodeLevelDetails.instanceName }}
+          patchVersion: {{ database_facts[db_name].dbNodeLevelDetails.patchVersion }}
+          homePath: {{ database_facts[db_name].dbNodeLevelDetails.homePath }}
+          status: {{ database_facts[db_name].dbNodeLevelDetails.openMode }}
+        ==================================================
+    when:
+      - database_facts is defined
+    tags: [print_action]
+
+...

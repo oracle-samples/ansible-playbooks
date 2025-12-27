@@ -1,0 +1,104 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Pre-tasks
+  block:
+
+  - name: Create directory stage
+    ansible.builtin.file:
+      path: "{{ stage_dir }}/ahf_stage" 
+      state: directory
+      owner: oracle 
+      group: oinstall 
+      mode: '0755'
+
+  - name: Find local ahf_file 
+    find:
+      paths: "{{ stage_dir }}/ahf_stage/" 
+      patterns: "AHF-LINUX_v*.zip" 
+    register: ahf_file 
+    delegate_to: localhost
+    become: false 
+
+  - name: Copy AHF files 
+    copy: 
+      src: "{{ item.path }}"
+      dest: "{{ stage_dir }}/ahf_stage/"
+    with_items: "{{ ahf_file.files }}"
+    loop_control:
+      label: "{{ item.path }}"
+
+  - name: Check if AHF is already installed
+    stat:
+      path: "{{ oracle_ahf_loc }}/bin/tfactl"
+    register: stat_ahf
+
+  become: true
+  when: oracle_ahf_loc is defined
+
+- name: Install AHF 
+  block:
+
+  - name: Find remote ahf_file 
+    find:
+      paths: "{{ stage_dir }}/ahf_stage/" 
+      patterns: "AHF-LINUX_v*.zip" 
+    register: ahf_file 
+
+  - name: Unzip remote ahf archive
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ stage_dir }}"
+      mode: 0755
+    with_items: "{{ ahf_file.files }}"
+    loop_control:
+      label: "{{ item.path }}"
+    environment:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+
+  - name: Create oracle ahf directory 
+    ansible.builtin.file:
+      path: "{{ oracle_ahf_loc }}/data" 
+      state: directory
+      owner: root 
+      group: root 
+      mode: '0755'
+
+  - name: Run ahf installer
+    shell: "{{ stage_dir }}/ahf_setup -silent -ahf_loc /opt/oracle.ahf -data_dir /u01/oracle.ahf/data -local"
+
+  become: true
+  when: 
+    - oracle_ahf_loc is not defined
+    - stat_ahf is not defined
+    - stat_ahf.stat.exists == false
+
+- name: Post-tasks
+  block:
+
+  - debug:
+      msg: "{{ oracle_ahf_loc }}<="
+
+  - name: AHF setupgrade to autoupgrade 
+    shell: "{{ oracle_ahf_loc }}/bin/ahfctl setupgrade -autoupgrade on -swstage {{ stage_dir }}/ahf_stage -frequency 1 -remove_installer yes" 
+
+  # - name: AHF upgrade 
+  #   shell: "{{ oracle_ahf_loc }}/bin/ahfctl upgrade -nomos" 
+  #   register: command_result
+  #   failed_when: 
+  #     - command_result.rc != 0
+  #     - '"AHF is already running latest version. No need to upgrade." not in command_result.stdout'
+
+  become: true
+  when: 
+    - oracle_ahf_loc is defined 
+

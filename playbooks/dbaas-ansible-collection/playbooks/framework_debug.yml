@@ -1,0 +1,26 @@
+---
+# file: framework.yml
+
+- name: MAAaaS Framework 
+  hosts: all 
+  order: sorted
+  gather_facts: false
+  collections:
+    - ansible.builtin
+    - community.general
+    - oracle.dbaas 
+    
+  roles:
+    # Before
+    - get_host_facts
+    - get_oracle_facts
+    - framework_pre_task
+    - framework_start
+    # # Actions
+    # - dbaas_dataguard_configure
+    # - dbaas 
+    # # - gghub_maa_ha
+    # # After
+    # - get_oracle_facts
+    - framework_stop
+    - framework_post_task

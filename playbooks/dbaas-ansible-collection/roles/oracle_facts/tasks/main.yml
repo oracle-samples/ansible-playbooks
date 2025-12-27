@@ -1,0 +1,145 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+
+- name: Gather Oracle facts
+  when: database_list is defined 
+  tags:
+    - always
+    - oracle_facts
+  block:
+
+  - name: Execute control_node prerequisites 
+    ansible.builtin.include_tasks: control_node/prerequisites/main.yml
+
+  - name: Validate Ansible/Jinja2 version, Ansible collections, role variables, and supported distributions
+    ansible.builtin.include_tasks: control_node/assert/main.yml
+
+  - name: Gather managed_hosts facts 
+    ansible.builtin.include_tasks: managed_nodes/prerequisites/main.yml
+
+  # - name: Gather oracle_home facts 
+  #   ansible.builtin.include_tasks: managed_nodes/oracle_home.yml
+
+  - name: Assert managed_hosts 
+    ansible.builtin.include_tasks: managed_nodes/assert/main.yml
+
+  - name: dbservers 
+    import_tasks: dbservers/main.yml 
+
+  # - name: Gather sbservers facts
+  #   ansible.builtin.include_tasks: sbservers/main.yml
+  #   when: "'sbservers' in group_names"
+
+  # - pause:
+  #     seconds: 1
+  #     prompt: |
+  #       ==================================================
+  #       {% if oracle_facts is defined %}
+  #         {{ oracle_facts.grid | to_nice_yaml }}
+  #       {% endif %}
+  #       -----------------
+  #       {% if database_facts is defined %}
+  #         {{ database_facts | to_nice_yaml }} 
+  #       ==================================================
+  #       {% endif %}
+  #   tags: [print_action]
+
+  # - name: DBaasCLI - Gather database facts 
+  #   ansible.builtin.include_tasks: dbaascli_database_getDetails.yml  
+  #   with_items: "{{ db_name_list }}"
+  #   loop_control:
+  #     loop_var: db_name
+  #   when: 
+  #     - oracle_facts.server.dbservers
+  #     - db_name_list is defined 
+  #     - oracle_facts.system.dbaascli
+
+  # - name: DBaasCA - Gather database facts 
+  #   ansible.builtin.include_tasks: dbaasca_database_getDetails.yml  
+  #   with_items: "{{ db_name_list }}"
+  #   loop_control:
+  #     loop_var: db_name
+  #   when:
+  #     - db_name is defined 
+  #     - oracle_facts.server.dbservers
+  #     - db_name_list is defined 
+  #     - not oracle_facts.system.dbaascli
+
+  # - name: DBaasCLI - Gather database facts 
+  #   ansible.builtin.include_tasks: dbaascli_database_getDetails.yml  
+  #   with_items: "{{ db_name_list }}"
+  #   loop_control:
+  #     loop_var: db_name
+  #   when: 
+  #     - db_name is defined
+  #     - oracle_facts.server.dbservers
+  #     - db_name_list is defined 
+  #     - oracle_facts.system.dbaascli
+
+  # - name: Gather system facts 
+  #   ansible.builtin.include_tasks: system.yml
+
+  # - name: Assert system
+  #   ansible.builtin.import_role:
+  #     name: oracle_meta 
+  #     tasks_from: system.yml
+
+  # - name: Gather grid facts 
+  #   ansible.builtin.include_tasks: grid.yml
+
+  # - name: Assert grid 
+  #   ansible.builtin.import_role:
+  #     name: oracle_meta 
+  #     tasks_from: grid.yml
+
+  # - name: Gather oracle_home facts 
+  #   ansible.builtin.include_tasks: oracle_home.yml
+
+  # - name: DBaasCA - Gather database facts 
+  #   ansible.builtin.include_tasks: dbaasca_database_getDetails.yml  
+  #   with_items: "{{ db_name_list }}"
+  #   loop_control:
+  #     loop_var: db_name
+  #   when:
+  #     - db_name is defined 
+  #     - oracle_facts.server.dbservers
+  #     - db_name_list is defined 
+  #     - not oracle_facts.system.dbaascli
+
+  # - name: DBaasCLI - Gather database facts 
+  #   ansible.builtin.include_tasks: dbaascli_database_getDetails.yml  
+  #   with_items: "{{ db_name_list }}"
+  #   loop_control:
+  #     loop_var: db_name
+  #   when: 
+  #     - db_name is defined
+  #     - oracle_facts.server.dbservers
+  #     - db_name_list is defined 
+  #     - oracle_facts.system.dbaascli
+
+  # - name: Gather sbservers facts
+  #   ansible.builtin.include_tasks: sbservers.yml
+  #   when: "'sbservers' in group_names"
+
+  # - name: Gather gghservers facts
+  #   ansible.builtin.include_tasks: gghservers.yml
+  #   when: "'gghservers' in group_names"
+
+  # - name: Assert gghservers 
+  #   ansible.builtin.import_role:
+  #     name: oracle_meta 
+  #     tasks_from: gghub.yml
+  #   when: "'gghservers' in group_names" 
+
+
+...

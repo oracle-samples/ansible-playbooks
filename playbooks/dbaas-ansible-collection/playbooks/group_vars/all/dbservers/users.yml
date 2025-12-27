@@ -1,0 +1,8 @@
+# Oracle database OS user (sqlplus, rman, srvctl).
+#
+oracle_user: oracle
+oracle_group: oinstall
+
+# Oracle Grid Infrastructure OS user (asmcmd, crsctl, srvctl).
+#
+grid_user: grid

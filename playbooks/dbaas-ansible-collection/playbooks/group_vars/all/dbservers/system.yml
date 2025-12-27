@@ -1,0 +1,30 @@
+# dbservers
+
+system_config:     
+  inventory_loc:        "{{ oracle_facts | community.general.json_query('system.db_name') }}"
+  dbaascli_on:          "{{ oracle_facts | community.general.json_query('system.dbaascli_on') }}"
+  crs_on:               "{{ oracle_facts | community.general.json_query('system.crs_on') }}"
+  oracle_ahf_loc:       "{{ oracle_facts | community.general.json_query('system.oracle_ahf_loc') }}"
+
+grid_config:
+  active_version:       "{{ oracle_facts | community.general.json_query('grid.activeVersion') }}"
+  state:                "{{ oracle_facts | community.general.json_query('grid.state') }}"
+  oracle_home:          "{{ oracle_facts.grid.oracle_home }}"
+  scan_name:            "{{ oracle_facts | community.general.json_query('grid.scan_name') }}" 
+  scan_ips:             "{{ oracle_facts | community.general.json_query('grid.scan_ips') }}" 
+  cluster_nodes:        "{{ oracle_facts | community.general.json_query('grid.cluster_nodes') }}" 
+  master_node:          "{{ (oracle_facts | community.general.json_query('grid.cluster_nodes') | split(',')) | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname')) | sort | first }}"
+  instanceName:         "+ASM{{ ansible_hostname[-1] }}"
+
+# @var grid_env:description: >
+# The variable is used for shell, command tasks to set environment Variables.
+#
+# Do not set it in inventory!
+# @end
+grid_env:
+  PATH: "/sbin:/bin:/usr/sbin:/usr/bin:{{ grid_config.oracle_home }}/bin:{{ grid_config.oracle_home }}/OPatch"
+  ORACLE_SID: "{{ grid_config.instanceName }}"
+  ORACLE_HOSTNAME: "{{ ansible_hostname }}"
+  LD_LIBRARY_PATH: "{{ grid_config.oracle_home }}/lib"
+  OH: "{{ grid_config.oracle_home }}"
+  ORACLE_HOME: "{{ grid_config.oracle_home }}"

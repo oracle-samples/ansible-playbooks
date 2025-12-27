@@ -1,0 +1,28 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+galaxy_info:
+  role_name: dbaas 
+  author: Sebastian Alasino
+  description: Oracle Database as a Service (DBAAS) 
+  company: Oracle 
+
+  license: license (MIT)
+
+  min_ansible_version: 2.14.0
+
+  galaxy_tags: 
+    - oracle
+    - database 
+
+dependencies:
+    - oracle_facts

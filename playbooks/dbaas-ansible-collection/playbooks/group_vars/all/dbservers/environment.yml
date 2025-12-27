@@ -1,0 +1,73 @@
+# dbservers
+
+system_config:     
+  inventory_loc:        "{{ oracle_facts | community.general.json_query('system.db_name') }}"
+  dbaascli_on:          "{{ oracle_facts | community.general.json_query('system.dbaascli_on') }}"
+  crs_on:               "{{ oracle_facts | community.general.json_query('system.crs_on') }}"
+  oracle_ahf_loc:       "{{ oracle_facts | community.general.json_query('system.oracle_ahf_loc') }}"
+
+grid_config:
+  active_version:       "{{ oracle_facts | community.general.json_query('grid.activeVersion') }}"
+  state:                "{{ oracle_facts | community.general.json_query('grid.state') }}"
+  oracle_home:          "{{ oracle_facts.grid.oracle_home }}"
+  scan_name:            "{{ oracle_facts | community.general.json_query('grid.scan_name') }}" 
+  scan_ips:             "{{ oracle_facts | community.general.json_query('grid.scan_ips') }}" 
+  cluster_nodes:        "{{ oracle_facts | community.general.json_query('grid.cluster_nodes') }}" 
+  master_node:          "{{ (oracle_facts | community.general.json_query('grid.cluster_nodes') | split(',')) | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname')) | sort | first }}"
+  instanceName:         "+ASM{{ ansible_hostname[-1] }}"
+
+database_config:
+  db_name:              "{{ oracle_facts | community.general.json_query(db_name+'.db_name') }}"
+  db_unique_name:       "{{ oracle_facts | community.general.json_query(db_name+'.db_unique_name') }}"
+  db_role:              "{{ oracle_facts | community.general.json_query(db_name+'.db_role') }}"
+  # cdb_connectString:    "{{ oracle_facts[db_name].db_unique_name  }}.{{ oracle_facts[db_name].dbDomain }}"
+  oracle_home:          "{{ oracle_facts | community.general.json_query(db_name+'.oracle_home') }}"
+  oracle_base:          "{{ oracle_facts | community.general.json_query(db_name+'.oracle_home') }}"
+  # oracle_base:          "{{ oracle_facts[db_name].oracle_home | default('not_defined/a/b/c') | dirname | dirname | dirname }}"
+  instance_name:        "{{ oracle_facts | community.general.json_query(db_name+'.instance_name') }}"
+  db_domain:            "{{ oracle_facts | community.general.json_query(db_name+'.db_domain') }}"
+  db_type:              "{{ oracle_facts | community.general.json_query(db_name+'.db_type') }}"
+  dg_on:                "{{ oracle_facts | community.general.json_query(db_name+'.dg_on') }}"
+  # isCDB:                "{{ oracle_facts[db_name].isCDB }}"
+  oracle_home_version:  "{{ oracle_facts | community.general.json_query(db_name+'.oracle_home_version') }}"
+  flashback_on:         "{{ oracle_facts | community.general.json_query(db_name+'.flashback_on') }}"
+  force_logging_on:     "{{ oracle_facts | community.general.json_query(db_name+'.force_logging_on') }}"
+  # master_node:          "{% if oracle_facts.system.dbaascli is true %}{{ (oracle_facts[db_name].dbNodeLevelDetails | dict2items | community.general.json_query('[?value.status!=`Not running`].key')) | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname') ) | sort | first }}{% else %}{{ oracle_facts[db_name].master_node }}{% endif %}" 
+  master_node:          "{{ oracle_facts | community.general.json_query(db_name+'.master_node') }}"
+  # master_node:          "{{ grid_config.master_node }}"
+  tde_on:               "{{ oracle_facts | community.general.json_query(db_name+'.tde_on') }}"
+  wallet_root:          "{{ oracle_facts | community.general.json_query(db_name+'.wallet_root') }}"
+  # pdbs: "{{ oracle_facts[db_name].pdbs  }}"
+  pga_aggregate_target:       "{{ oracle_facts | community.general.json_query(db_name+'.pga_aggregate_target') }}"
+  processes:                  "{{ oracle_facts | community.general.json_query(db_name+'.processes') }}"
+  sga_target:                 "{{ oracle_facts | community.general.json_query(db_name+'.sga_target') }}"
+  db_recovery_file_dest_size: "{{ oracle_facts | community.general.json_query(db_name+'.db_recovery_file_dest_size') }}"
+
+pdb_config:
+  connectString:  "{{ oracle_facts[db_name].pdbs[pdb_name] | community.general.json_query('pdbConnectStrings[*].connectString') | first }}"
+  serviceName:    "{{ oracle_facts[db_name].pdbs[pdb_name] | community.general.json_query('pdbConnectStrings[*].serviceName') | first }}"
+
+# @var grid_env:description: >
+# The variable is used for shell, command tasks to set environment Variables.
+#
+# Do not set it in inventory!
+# @end
+
+grid_env:
+  PATH: "/sbin:/bin:/usr/sbin:/usr/bin:{{ grid_config.oracle_home }}/bin:{{ grid_config.oracle_home }}/OPatch"
+  ORACLE_SID: "{{ grid_config.instanceName }}"
+  ORACLE_HOSTNAME: "{{ ansible_hostname }}"
+  LD_LIBRARY_PATH: "{{ grid_config.oracle_home }}/lib"
+  OH: "{{ grid_config.oracle_home }}"
+  ORACLE_HOME: "{{ grid_config.oracle_home }}"
+
+oracle_env:
+  PATH: "{{ database_config.oracle_home }}/bin:{{ database_config.oracle_home }}/OPatch:$PATH"
+  ORACLE_UNQNAME: "{{ database_config.db_unique_name }}"
+  ORACLE_SID: "{{ database_config.instance_name }}"
+  ORACLE_HOSTNAME: "{{ ansible_hostname }}"
+  LD_LIBRARY_PATH: "{{ database_config.oracle_home }}/lib"
+  ORACLE_BASE: "{{ database_config.oracle_home }}"
+  OH: "{{ database_config.oracle_home }}"
+  ORACLE_HOME: "{{ database_config.oracle_home }}"
+  # TNS_ADMIN: "{{ database_config.oracle_home }}/network/admin/{{ db_name }}"

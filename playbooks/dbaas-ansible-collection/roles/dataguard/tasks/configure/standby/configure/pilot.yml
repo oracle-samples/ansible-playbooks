@@ -1,0 +1,134 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: PILOT configureStandby Block
+  become: true
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  throttle: 1
+  when: 
+    - "'pilot' in ansible_run_tags"
+    - database_config.db_role is not defined
+    - hostname_target is defined
+    - ansible_hostname in hostname_target
+    - not oracle_facts.system.dbaascli
+    - hostvars['localhost']['primary'] is defined
+    - hostvars['localhost']['standby'] is defined
+  block:
+
+  - name: Create remote shared_dir 
+    file:
+      path: "{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: 
+      - "{{ acfs_mount_point }}/{{ db_name }}"
+      - "{{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['DBUniqueName'] }}"
+      - "{{ reg_tmp_files }}"
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      src: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.{% if 'prereqs' in ansible_run_tags %}json{% else %}tar{% endif %}"
+      dest: "{{ reg_tmp_files }}" 
+      owner: oracle 
+      group: oinstall 
+      mode: 0644
+    register: copy_prepareForStandby_blob_file
+
+  - name: Run PILOT configure_standby_db_cloud 
+    expect:
+      command: >
+        {{ pilot }}
+        -silent 
+        -plugin configure_standby_db_cloud 
+        DB_NAME="{{ db_name }}" 
+        ORACLE_HOME="{{ oracleHomePath }}"
+        DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}"
+        AGENT_DB_ID="00229ef0-d3da-4082-8ef0-d49768cac803" 
+        DBAASAPI_JOB_ID="jobid-{{ lookup('ansible.builtin.password', '/dev/null', chars=['digits'], length=5) }}" 
+        EXECUTE_PREREQS="{% if 'prereqs' in ansible_run_tags %}true{% else %}false{% endif %}" 
+        IGNORE_PREREQ_FAILURE="false" 
+        SKIP_PREREQS="false" 
+        STANDBY_DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}" 
+        STANDBY_DB_DOMAIN="{{ hostvars['localhost']['standby']['DBDomain'] }}"
+        STANDBY_SERVICE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}.{{ hostvars['localhost']['standby']['DBDomain'] }}" 
+        STANDBY_SCAN_NAME="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['standby']['ScanName'] }}{% else %}{{ hostvars['localhost']['standby']['HostIPAddress'] }}{% endif %}" 
+        STANDBY_SCAN_PORT="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['standby']['ScanPort'] }}{% else %}{{ hostvars['localhost']['standby']['HostPort'] }}{% endif %}" 
+        PRIMARY_SERVICE_NAME="{{ hostvars['localhost']['primary']['DBUniqueName'] }}.{{ hostvars['localhost']['primary']['DBDomain'] }}" 
+        PRIMARY_SCAN_NAME="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['primary']['ScanName'] }}{% else %}{{ hostvars['localhost']['primary']['HostIPAddress'] }}{% endif %}" 
+        PRIMARY_SCAN_PORT="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['primary']['ScanPort'] }}{% else %}{{ hostvars['localhost']['primary']['HostPort'] }}{% endif %}" 
+        NODE_LIST="{{ grid_config.cluster_nodes }}"
+        PROTECTION_MODE="MAX_PERFORMANCE"
+        TRANSPORT_TYPE="ASYNC"
+        ACTIVE_DG="TRUE"
+        {% if 'prereqs' in ansible_run_tags %}STANDBY_DB_INFO_JSON="{{ reg_tmp_files }}/prepareForStandby_{{ db_name }}.json"{% else %}STANDBY_BLOB_FROM_PRIMARY="{{ reg_tmp_files }}/prepareForStandby_{{ db_name }}.tar"{% endif %}
+        SGA_SIZE_IN_MB="{{ sga_size_in_mb | default(hostvars['localhost']['primary']['sga_target'] | int | human_readable(unit='M') | split('.') | first) }}"
+        PGA_SIZE_IN_MB="{{ pga_size_in_mb | default(hostvars['localhost']['primary']['pga_aggregate_target'] | int | human_readable(unit='M') | split('.') | first) }}"
+        DATAFILE_DESTINATION="{{ asm.diskgroup.data }}"
+        FRA_DESTINATION="{{ asm.diskgroup.reco }}"
+        REDO_LOG_DESTINATION="{{ asm.diskgroup.data }}"
+        FRA_SIZE_IN_MB="{{ hostvars['localhost']['primary']['db_recovery_file_dest_size'] | int | human_readable(unit='M') | split('.') | first }}"
+        Validate_rpms_consistency="false"
+        Validate_CRS_running="false"
+        Export_cloud_properties="false"
+        Perform_dbca_prechecks="false"
+        -logDir /var/opt/oracle/log/{{ db_name }}/dataguard/prepareForStandby
+        -checkpointDir {{ oracleHomePath | dirname | dirname | dirname }}/cfgtoollogs/dbca/checkpoints/oracle/prepare_for_standby
+      responses:
+        (?i)password: "{{ db_sys_password }}"
+      timeout: 3600 
+    register: pilot_configure_standby_db_cloud 
+    # when: ansible_hostname in grid_config.master_node
+    ignore_errors: true
+    # failed_when: 
+    #   - "'Running Recover_managed_standby job' not in dbca_configureStandby.stdout"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        PILOT pilot_configure_standby_db_cloud 
+        -----------------
+        {{ pilot_configure_standby_db_cloud.cmd }} 
+        -----------------
+        {{ pilot_configure_standby_db_cloud.stdout }} 
+        ==================================================
+    when: pilot_configure_standby_db_cloud is not skipped
+
+  - debug: var=pilot_configure_standby_db_cloud.stdout_lines
+
+  - shell: "grep SEVERE {{ pilot_configure_standby_db_cloud.stdout_lines | regex_findall('Log file location: (.+)') | first | split(',') | replace(\"'\",'') }}"
+    register: configureStandby_error
+    when: pilot_configure_standby_db_cloud.failed 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        PILOT configureStandby_error
+        -----------------
+        {{ configureStandby_error.stdout_lines }}
+        ==================================================
+    when: pilot_configure_standby_db_cloud.failed 
+    failed_when: pilot_configure_standby_db_cloud.failed 
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

@@ -1,0 +1,62 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: assert ansible-oracle variables
+  tags:
+    - always
+    - oracle_assert 
+  block:
+  
+    - name: Check switch for oracle_facts_assert_oracle_database
+      ansible.builtin.debug:
+        msg: >-
+          WARNING!!! Assert for oracle_database has been disabled!
+      when:
+        - not oracle_facts_assert_oracle_database | bool
+
+    - name: assert oracle_database
+      when:
+        - oracle_facts_assert_oracle_database | bool
+      block:
+        - name: assert oracle_database
+          ansible.builtin.assert:
+            quiet: true
+            that:
+             - ass_odb.db_name is defined
+          with_items:
+            - "{{ db_name }}"
+          loop_control:
+            label: "{{ ass_odb.oracle_db_name | default('') }}"
+            loop_var: ass_odb
+          when:
+            - db_name is defined
+          register: oracle_database_assert
+
+      rescue:
+
+        - name: assert failed assert db_name
+          ansible.builtin.debug:
+            msg: "{{ item.assertion }}"
+          with_items:
+            - "{{ oracle_database_assert['results'] }}"
+          loop_control:
+            label: "{{ item['dbc']['key'] | default('') }}"
+          when:
+            - oracle_database_assert.results is defined
+            - item.failed is defined
+            - item.failed | bool
+
+        - name: fail assert db_name
+          ansible.builtin.fail:
+            msg: "See previous debug task for assertation failure"
+
+...

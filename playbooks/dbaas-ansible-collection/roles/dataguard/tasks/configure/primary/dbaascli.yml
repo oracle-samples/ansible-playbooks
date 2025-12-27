@@ -1,0 +1,89 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCLI Block 
+  become: true
+  block:
+
+  - name: Run DBaasCLI dataguard getDetails on primary DB
+    command: >
+      dbaascli dataguard getDetails 
+      --db_name {{ db_name }}
+    register: dataguard_getDetails
+    failed_when: 
+      - dataguard_getDetails.rc != 0
+      - "'DBAAS-80035' not in dataguard_getDetails.stdout"
+      # [DBAAS-80035] The following database does not have Oracle Data Guard enabled
+
+  - name: Run DBaasCLI dataguard enableMultipleStandbySupport on primary DB
+    command: >
+      dbaascli dataguard enableMultipleStandbySupport 
+      --db_name {{ db_name }}
+    register: dataguard_enableMultipleStandbySupport
+    when: 
+      - not "'prereqs' in ansible_run_tags"
+      - dataguard_getDetails is success
+      - "'dbaascli execution completed' in dataguard_getDetails.stdout"
+
+  - name: Run DBaasCLI dataguard prepareForStandby on primary DB
+    expect:
+      command: >
+        dbaascli dataguard prepareForStandby 
+        --db_name {{ db_name }}
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['db_unique_name'] }}
+        --standbyScanIPAddresses {{ hostvars['localhost']['standby']['scan_ip_addresses'] }}
+        --standbyScanPort {{ hostvars['localhost']['standby']['scan_port'] }}
+        --standbyDBDomain {{ hostvars['localhost']['standby']['db_domain'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['scan_ip_addresses'] }}
+        --primaryScanPort {{ hostvars['localhost']['primary']['scan_port'] }}
+        {% if 'prereqs' in (ansible_run_tags|lower) %}--executePrereqs{% endif %}
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: prepareForStandby
+    failed_when: "'dbaascli execution completed' not in prepareForStandby.stdout"
+    ignore_errors: true
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ prepareForStandby.stdout | regex_findall(', the file (.+) needs to be copied') | first }}"
+      dest: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.zip"
+      flat: yes
+    when: prepareForStandby is success
+
+  # - name: Set prepareForStandby_files fact
+  #   delegate_to: localhost
+  #   delegate_facts: true
+  #   when: prepareForStandby is success
+  #   ansible.builtin.set_fact:
+  #     prepareForStandby_files: "{{ prepareForStandby.stdout | regex_findall(', the file (.+) needs to be copied') | first | basename }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI prepareForStandby
+        -----------------
+        {{ prepareForStandby.cmd }}
+        -----------------
+        {{ prepareForStandby.stdout }} 
+        ==================================================
+    when: prepareForStandby is not skipped
+    failed_when: prepareForStandby.failed 
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

@@ -1,0 +1,108 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: SSH Configure Equivalences
+  tags: ssh_equivalence
+  block:
+
+  - name: Copy content into .ssh/config 
+    become: true
+    copy:
+      dest: "/home/{{ item.user }}/.ssh/config"
+      owner: "{{ item.user }}"
+      group: "{{ item.group }}"
+      content: |
+        Host *
+          ServerAliveInterval 60
+          ServerAliveCountMax 2
+    with_items:
+      - { user: opc,   group: opc }
+      - { user: grid,   group: oinstall }
+      - { user: oracle, group: oinstall }
+
+  - name: Create a 2048-bit SSH key for users grid/oracle
+    become: true
+    ansible.builtin.user:
+      name: "{{ item }}" 
+      generate_ssh_key: yes
+      ssh_key_bits: 2048
+      ssh_key_file: .ssh/id_rsa
+    with_items:
+      - grid
+      - oracle
+      - opc
+
+  - name: Remove local id_rsa.pub files
+    ansible.builtin.file:
+      path: "{{ stage_dir.control.tmp }}/sshkey_{{ ansible_limit }}_{{ inventory_hostname }}_{{ item }}_id_rsa.pub"
+      state: absent
+    with_items:
+      - opc 
+      - grid
+      - oracle
+    delegate_to: localhost
+
+  - name: Fetch id_rsa.pub files
+    become: true
+    ansible.builtin.fetch:
+      src: "/home/{{ item }}/.ssh/id_rsa.pub"
+      dest: "{{ stage_dir.control.tmp }}/sshkey_{{ ansible_limit }}_{{ inventory_hostname }}_{{ item }}_id_rsa.pub"
+      flat: yes
+    with_items:
+      - opc 
+      - grid
+      - oracle
+
+  - name: Set authorized key taken for user oracle 
+    become: true
+    environment:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+    authorized_key:
+      user: oracle 
+      state: present
+      key: "{{ lookup('file', '{{ item }}') }}"
+    with_fileglob:
+      - "{{ stage_dir.control.tmp }}/sshkey_{{ ansible_limit }}_*_oracle_id_rsa.pub"
+
+  - name: Set authorized key taken for user grid 
+    become: true
+    environment:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+    authorized_key:
+      user: grid 
+      state: present
+      key: "{{ lookup('file', '{{ item }}') }}"
+    with_fileglob:
+      - "{{ stage_dir.control.tmp }}/sshkey_{{ ansible_limit }}_*_grid_id_rsa.pub"
+
+  - name: Set authorized key taken for user opc 
+    become: true
+    environment:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+    authorized_key:
+      user: opc 
+      state: present
+      key: "{{ lookup('file', '{{ item }}') }}"
+    with_fileglob:
+      - "{{ stage_dir.control.tmp }}/sshkey_{{ ansible_limit }}_*_opc_id_rsa.pub"
+
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of gghub_equivalences_config
+      ansible.builtin.fail:
+        msg: >-
+          Set gghub_equivalences_config=false in inventory/group_vars/gghservers to disable this fail task.
+      when:
+        - gghub_equivalences_config | default(true)
+    
+...

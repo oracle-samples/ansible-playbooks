@@ -1,0 +1,108 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCLI configureStandby Block
+  become: true
+  throttle: 1
+  block:
+
+  - name: Create remote reg_tmp_files 
+    file:
+      path: /var/opt/oracle/log/reg_tmp_files
+      state: directory
+      mode: '0750'
+      owner: oracle 
+      group: oinstall
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      # src: "/tmp/{{ hostvars['localhost']['prepareForStandby_files'] }}" 
+      src: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.zip"
+      dest: /var/opt/oracle/log/reg_tmp_files 
+      owner: oracle 
+      group: oinstall 
+      mode: 0640
+
+  - name: Run DBaasCLI dataguard configureStandby 
+    expect:
+      command: >
+        dbaascli dataguard configureStandby 
+        --db_name {{ db_name }}
+        --oracleHomeName {{ oracleHomeName }} 
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['db_unique_name'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['scan_ip_addresses'] }}
+        --primaryScanPort {{ hostvars['localhost']['primary']['scan_port'] }}
+        --primaryServiceName {{ hostvars['localhost']['primary']['db_unique_name'] }}.{{ hostvars['localhost']['primary']['db_domain'] }}
+        --protectionMode MAX_PERFORMANCE 
+        --transportType ASYNC 
+        --activeDG true 
+        --standbyScanIPAddresses {{ hostvars['localhost']['standby']['scan_ip_addresses'] }}
+        --standbyScanPort {{ hostvars['localhost']['standby']['scan_port'] }}
+        --standbyDBInfoJsonLocation /var/opt/oracle/log/reg_tmp_files/prepareForStandby_{{ db_name }}.zip
+        {% if 'prereqs' in (ansible_run_tags|lower) %}--executePrereqs{% endif %}
+      responses:
+        PRIMARY_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        PRIMARY_DB_TDE_PASSWORD: "{{ db_tde_password }}" 
+        AWR_ADMIN_PASSWORD: "{{ awr_admin_password }}" 
+        AWR_ADMIN_PASSWORD (reconfirmation): "{{ awr_admin_password }}" 
+      timeout: 14400 
+    throttle: 1
+    register: configureStandby
+    failed_when: "'dbaascli execution completed' not in configureStandby.stdout"
+    ignore_errors: true
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI configureStandby
+        -----------------
+        {{ configureStandby.cmd }}
+        -----------------
+        {{ configureStandby.stdout }} 
+        ==================================================
+    when: configureStandby is not skipped
+    failed_when: configureStandby.failed 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI dataguard switchover prereqs
+        -----------------
+        {{ dataguard_switchover_prereqs.cmd }}
+        -----------------
+        {{ dataguard_switchover_prereqs.stdout }} 
+        ==================================================
+    when: dataguard_switchover_prereqs is not skipped
+
+  - name: Run DBaasCLI dataguard switchover prereqs
+    command: >
+      dbaascli dataguard switchover 
+      --db_name {{ db_name }}
+      --targetStandbyDBUniqueName {{ hostvars['localhost']['standby']['db_unique_name'] }}
+      --executePrereqs
+    register: dataguard_switchover_prereqs
+    when:
+      - not "'prereqs' in (ansible_run_tags|lower)" 
+      - configureStandby.changed
+    failed_when: 
+      - "'Prerequisite checks completed successfully' not in dataguard_switchover_prereqs.stdout"
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

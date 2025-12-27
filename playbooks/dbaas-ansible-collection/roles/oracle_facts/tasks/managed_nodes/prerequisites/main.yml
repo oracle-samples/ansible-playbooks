@@ -1,0 +1,87 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Gather Server Facts
+  block:
+
+  - name: Clear gathered facts from all currently targeted hosts
+    ansible.builtin.meta: clear_facts
+
+  - name: Gather server default minimum amount of facts and weed out unavailable hosts
+    ansible.builtin.setup:
+      # gather_subset:
+      #   - "!all"
+      #   - "mounts" 
+
+  - name: Set remaining hosts as not missing
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_server | items2dict) }}"
+      missing: false
+      job_success: true
+    vars:
+      _server:
+        - key: server 
+          value:
+            job_success:  True
+            missing:      False
+            dbservers:     "{% if 'dbservers'   in group_names %}True{% else %}False{% endif %}"
+            sbservers:     "{% if 'sbservers'   in group_names %}True{% else %}False{% endif %}"
+            appservers:    "{% if 'appservers'  in group_names %}True{% else %}False{% endif %}"
+            webservers:    "{% if 'webservers'  in group_names %}True{% else %}False{% endif %}"
+            gsmservers:    "{% if 'gsmservers'  in group_names %}True{% else %}False{% endif %}"
+            gghserver:     "{% if 'gghserver'   in group_names %}True{% else %}False{% endif %}"
+
+  - name: Set db_timezone fact
+    set_fact: 
+      db_timezone: "{{ ansible_facts.date_time.tz_offset }}" 
+    delegate_to: localhost 
+    delegate_facts: true
+    when: oracle_facts.server.dbservers
+
+  - name: Create stage_dir.managed directory
+    become: true
+    file:
+      path: "{{ stage_dir.managed }}.{{ item }}"
+      state: directory
+      mode: '0755'
+      owner: "{{ oracle_user }}" 
+      group: "{{ oracle_group }}"
+    with_items:
+      - workdir
+      - tmp
+      - software
+
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of system
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_fact_host_ignore_failed=true in inventory/group_vars/dbservers to disable this fail task.
+      when:
+        - not oracle_fact_host_ignore_failed | default(false)
+
+    - name: Write empty facts to host (rescue from failure above)
+      ansible.builtin.set_fact:
+        cacheable: false
+        oracle_facts: "{{ oracle_facts | default({}) | combine(_server | items2dict) }}"
+        missing: false
+        job_success: true
+      vars:
+        _server:
+          - key: server 
+            value:
+              job_success:  False
+              missing:      True
+    
+...

@@ -1,0 +1,199 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+# tasks file for dbaasca_database_create 
+# Requires 1 argument:
+#   1. targetVersion or targetHome 
+# ansible-playbook oracle.dbaas.dbaas --limit slc1 -e @inventory/envs/slc1.ini -e "targetVersion=23.5.0.24.07" --tags database_create
+# ansible-playbook oracle.dbaas.dbaas --limit slc1 -e @inventory/envs/slc1.ini -e "targetHome=/u01/app/oracle/product/23.5.0.24/db_home_23502407" --tags database_create
+
+# - name: hugepages 
+#   block:
+
+#   - name: Set vm.nr_hugepages 
+#     ansible.posix.sysctl:
+#       name: vm.nr_hugepages 
+#       value: "{{ nr_hugepages.split('.')[0] }}"
+#       state: present
+
+#   - name: Edit the memlock setting in the /etc/security/limits.conf file
+#     copy:
+#       dest: /etc/security/limits.conf 
+#       content: |
+#         oracle soft nofile 131072
+#         oracle hard nofile 131072
+#         oracle soft nproc 131072
+#         oracle hard nproc 131072
+#         oracle soft core {{ memlock }}
+#         oracle hard core {{ memlock }}
+#         oracle soft memlock {{ memlock }} 
+#         oracle hard memlock {{ memlock }}
+#         oracle soft stack 10240
+#       backup: yes
+
+#   become: true
+#   vars:
+#     nr_hugepages: "{{ ( ansible_memtotal_mb * 1024 * 1024 * 0.6) / (2048 * 1024) + 1 | round }}"
+#     memlock: "{{ ansible_memtotal_mb * 0.90 * 1024 | round }}"
+#   when: "'hugepages' in ansible_run_tags" 
+
+# - name: Set targetHome when targetVersion is defined
+#   block:
+
+#   - name: Get targetHome path 
+#     shell: "grep '{{ (targetVersion|replace('.',''))[:2] }}.{{ (targetVersion|replace('.',''))[2] }}.{{ (targetVersion|replace('.',''))[3] }}.{{ (targetVersion|replace('.',''))[4:6] }}' {{ inventory_loc }}/ContentsXML/inventory.xml | awk '{ print $3 }' |  cut -d'\"' -f 2 | grep product | tail -1"
+#     register: targetHome_output
+#   - set_fact:
+#       targetHome: "{{ targetHome_output.stdout }}" 
+
+#   when: targetVersion is defined
+- name: Set targetHome when targetVersion is defined
+  block:
+
+  - name: Reading inventory.xml file
+    slurp:
+      src: "{{ inventory_loc }}/ContentsXML/inventory.xml" 
+    register: inventory_xml
+    become: true
+
+  - debug:
+      msg: "{{ item | regex_search(oracle_base+'.*/.*'+targetVersion|replace('.','')|string+'[0-9]*') }}"
+    with_items: "{{ (inventory_xml['content'] | b64decode | ansible.utils.from_xml | to_json | from_json)['INVENTORY']['HOME_LIST']['HOME'] }}"
+    register: inventory_xml_fact 
+
+  - set_fact:
+      targetHome: "{{ item.msg }}" 
+    with_items: "{{ inventory_xml_fact.results }}"
+    when: item.msg | length > 0 
+
+  - debug:
+      var: targetHome
+  
+  when: 
+    - targetHome is not defined
+    - targetVersion is defined
+    - db_role is not defined
+    - "ansible_hostname == primary_node"
+
+- name: Create RAC Database
+  block:
+
+  # - name: Generate random primaryDBUniqueName_prefix with length 4 
+  #   set_fact:
+  #     primaryDBUniqueName_prefix_default: "{{ lookup('community.general.random_string', length=4, upper=false, numbers=false, special=false) }}" 
+  #   when: primaryDBUniqueName_prefix is not defined
+  #   run_once: true
+  #   delegate_to: localhost 
+  #   delegate_facts: true
+
+  - name: Create Oracle Database 
+    shell: >
+      {{ targetHome }}/bin/dbca 
+      -silent 
+      -createDatabase 
+      -gdb_name {{ db_name }}.{{ domain }}
+      -dbUniqueName {{ primaryDBUniqueName }}
+      -sid {{ db_name }} 
+      -createAsContainerDatabase true
+      -pdb_name {{ pdb_name }}
+      -responseFile {{ targetHome }}/assistants/dbca/dbca.rsp 
+      -memoryPercentage 10 
+      -memoryMgmtType auto_sga
+      -databaseConfigType {% if crs==true %}RAC{% else %}SINGLE{% endif %}
+      -databaseType MULTIPURPOSE 
+      -templateName {{ targetHome }}/assistants/dbca/templates/General_Purpose.dbc
+      -datafileDestination {% if crs==true %}+{{ asm.diskgroup.data }}{% else %}{{ oracle_base }}/oradata{% endif %}
+      -enableArchive true 
+      -enableForceLogging true
+      -numberOfPDBs 1
+      -pdbAdminPassword {{ db_sys_password }}
+      -recoveryAreaDestination {% if crs==true %}+{{ asm.diskgroup.reco }}{% else %}{{ oracle_base }}/fast_recovery_area{% endif %}
+      -recoveryAreaSize 400G
+      -redoLogFileSize 4192
+      -storageType {% if crs==true %}ASM{% else %}FS{% endif %}
+      -sysPassword {{ db_sys_password }} 
+      -systemPassword {{ db_sys_password }}
+      -useBigFileForTablespace true 
+      -useLocalUndoForPDBs true
+      -useOMF true
+      -nodelist "{{ cluster_nodes }}"
+    register: dbca_createDatabase
+    async: 600
+    poll: 20 
+
+  - name: Configure RAC DB options in open state
+    shell: |
+      {{ targetHome }}/bin/sqlplus -s "{{ db_ezconnect }}" <<EOF
+      alter system set EVENT='16421 trace name context forever, level 3' scope=spfile sid='*';
+      alter system set EVENT='16453 trace name context forever, level 15' scope=spfile sid='*';
+      alter system set EVENT='10293 trace name context forever, level 3' scope=spfile sid='*';
+      alter system set "_mira_num_local_buffers"=250 scope=spfile sid='*';
+      alter system set "_mira_num_receive_buffers"=250  scope=spfile sid='*';
+      alter system set "_mira_rcv_max_buffers"=10000 scope=spfile sid='*';
+      alter system set db_writer_processes=32 scope=spfile sid='*';
+      alter system set log_archive_trace=551 scope=spfile sid='*';
+      alter system set standby_file_management=AUTO scope=spfile sid='*';
+      alter system set FAST_START_MTTR_TARGET=300 scope=spfile sid='*';
+      alter system set log_buffer=1G scope=spfile sid='*';
+      alter system set DB_BLOCK_CHECKING=FULL scope=spfile sid='*';
+      alter system set DB_LOST_WRITE_PROTECT=FULL scope=spfile sid='*';
+      alter system set "_log_read_buffers"=256 scope=spfile sid='*';
+      alter system set db_recovery_file_dest_size=400G scope=spfile sid='*';
+      exit
+      EOF
+
+  - name: Stop the database 
+    shell: |
+      {{ targetHome }}/bin/srvctl stop database -db {{ dbUniqueName }} -o immediate
+      {{ targetHome }}/bin/srvctl start instance -db {{ dbUniqueName }} -o mount -node `hostname`
+
+  - name: Enable flashback 
+    shell: |
+      {{ targetHome }}/bin/sqlplus -s "{{ db_ezconnect }}" <<EOF
+      alter database flashback on; 
+      exit
+      EOF
+    register: db_flashback_on
+    failed_when:
+      - db_flashback_on.rc > 0
+      - "'ORA-38713' not in db_flashback_on.stdout"  
+
+  - name: Start the database 
+    shell: |
+      {{ targetHome }}/bin/srvctl stop database -db {{ dbUniqueName }} -o immediate
+      {{ targetHome }}/bin/srvctl start database -db {{ dbUniqueName }} 
+
+  - name: Create Database env file 
+    blockinfile:
+      dest: ~/{{ db_name }}.env
+      create: true
+      block: |
+        ORACLE_HOME={{ targetHome }}; export ORACLE_HOME
+        PATH=$PATH:{{ targetHome }}/bin:{{ targetHome }}/OPatch; export PATH 
+        LD_LIBRARY_PATH={{ targetHome }}/lib; export LD_LIBRARY_PATH 
+        ORACLE_UNQNAME={{ dbUniqueName }}; export ORACLE_UNQNAME
+        ORACLE_SID={{ db_name }}1; export ORACLE_SID
+    failed_when: false
+
+  become: true
+  become_user: oracle
+  vars:
+    db_name: "{{ db_name_outer }}"
+    dbUniqueName: "{{ primaryDBUniqueName }}"
+  environment:    
+    ORACLE_HOME: '{{ targetHome }}' 
+    ORACLE_BASE: '{{ oracle_base }}' 
+    ORACLE_SID: "{{ db_name }}"
+  when: 
+      - targetHome is defined
+      - db_role is not defined
+      - ansible_hostname == primary_node

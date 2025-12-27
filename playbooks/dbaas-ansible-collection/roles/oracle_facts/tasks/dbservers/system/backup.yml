@@ -1,0 +1,215 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Find dbaascli
+  stat:
+    path: /usr/bin/dbaascli
+  register: _dbaascli_found
+
+- name: Gather system facts when dbaascli is present
+  when: 
+    - oracle_facts.server.dbservers
+    - ((oracle_facts.system.dbaascli|default(false)) or 
+      (_dbaascli_found.stat.exists|default(false)) )
+  block:
+
+    - name: Find /etc/oracle.ahf.loc
+      stat: 
+        path: /etc/oracle.ahf.loc
+      register: _ahf_file_found
+
+    - name: Reading /etc/oracle.ahf.loc
+      slurp:
+        src: /etc/oracle.ahf.loc
+      register: _ahf_file_content
+      when:
+        - _ahf_file_found.stat.exists
+
+    - name: Get scan configuration
+      become: true
+      shell: "$(grep ^crs_home /etc/oracle/olr.loc | cut -d= -f2)/bin/srvctl config scan"
+      register: _scan_config
+
+    - name: Set oracle_facts
+      ansible.builtin.set_fact:
+        cacheable: false
+        oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+      vars:
+        _system:
+          - key: system
+            value:
+              dbaascli: "{% if _dbaascli_found.stat.exists %}{{true|bool}}{% else %}{{false|bool}}{% endif %}"
+              scan_name: "{{ _scan_config.stdout | regex_search('SCAN name: (.+),' , '\\1') | first }}"
+              scan_ips:  "{{ _scan_config.stdout | regex_findall('IPv4 VIP: (.+)') | join(',') }}"
+              oracle_ahf_loc: "{% if _ahf_file_found.stat.exists %}{{ _ahf_file_content.content | b64decode | regex_search('(.+)ahf') }}{% else %}{{ false|bool }}{% endif %}" 
+
+    - name: Set oracle_facts
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: "{% if _ahf_file_found.stat.exists %}{{ _ahf_file_content.content | b64decode | regex_search('(.+)ahf') }}/common/venv/bin/python3{% else %}{{ false|bool }}{% endif %}"
+
+    # - name: Record system facts 
+    #   delegate_to: localhost
+    #   ansible.builtin.lineinfile:
+    #     path: "{{ playbook_dir }}/host_vars/{{ inventory_hostname }}" 
+    #     regexp: "^{{ item.parameter }}"
+    #     line: "{{ item.parameter }}: {{ item.value }}"
+    #     create: true
+    #   loop: 
+    #     - { parameter: "oracle_facts" , value: "" }
+    #     - { parameter: "  system" , value: "" }
+    #     - { parameter: "    oracle_ahf_loc" , value: "{{ oracle_facts.system.oracle_ahf_loc }}" }
+    #     - { parameter: "    dbaascli" , value: "{{ oracle_facts.system.dbaascli }}" }
+    #     - { parameter: "    scan_name" , value: "{{ oracle_facts.system.scan_name }}" }
+    #     - { parameter: "    scan_ips" , value: "{{ oracle_facts.system.scan_ips }}" }
+    #     - { parameter: "ansible_python_interpreter" , value: "{% if _ahf_file_found.stat.exists %}{{ _ahf_file_content.content | b64decode | regex_search('(.+)ahf') }}/common/venv/bin/python3{% else %}{{ false|bool }}{% endif %}" }
+
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of system
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_facts_system_ignore_failed=true in inventory/group_vars/dbservers to disable this fail task.
+      when:
+        - not oracle_facts_system_ignore_failed | default(false)
+
+    - name: Set empty facts to system(rescue from failure above)
+      ansible.builtin.set_fact:
+        cacheable: false
+        oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+      vars:
+        _system:
+          - key: system 
+            value:
+              state: failed 
+
+- name: Gather system facts when dbaascli is not present
+  when: 
+    - ((oracle_facts.system.dbaascli is not defined) or 
+      (not _dbaascli_found.stat.exists) )
+  block:
+
+  - name: Gather facts on listening ports
+    become: true
+    community.general.listen_ports_facts:
+
+  - name: Find /etc/oracle/olr.loc
+    stat: 
+      path: /etc/oracle/olr.loc 
+    register: _olr_file_found
+
+  - name: Find /etc/oraInst.loc
+    stat: 
+      path: /etc/oraInst.loc
+    register: _oraInst_file_found
+    
+  - name: Find /etc/oracle.ahf.loc
+    stat: 
+      path: /etc/oracle.ahf.loc
+    register: _ahf_file_found
+
+  - name: Reading /etc/oracle/olr.loc
+    slurp:
+      src: /etc/oracle/olr.loc 
+    register: _olr_file_content
+    when: _olr_file_found.stat.exists
+
+  - name: Reading /etc/oraInst.loc
+    slurp:
+      src: /etc/oraInst.loc
+    register: _oraInst_file_content
+    when: 
+      - _oraInst_file_found.stat.exists
+
+  - name: Reading /etc/oracle.ahf.loc
+    slurp:
+      src: /etc/oracle.ahf.loc
+    register: _ahf_file_content
+    when:
+      - _ahf_file_found.stat.exists
+
+  # - name: CRS start 
+  #   become: true
+  #   shell: |
+  #     {{ _olr_file_content.content | b64decode | regex_findall('crs_home=(.+)') | first }}/bin/crsctl start crs -wait
+  #   register: crsctl_start_crs 
+  #   failed_when: 
+  #     - crsctl_start_crs.rc != 0
+  #     - "'CRS-4640' not in crsctl_start_crs.stdout"
+  #     # CRS-4640: Oracle High Availability Services is already active
+
+  - name: Get scan configuration
+    become: true
+    shell: "{{ _olr_file_content.content | b64decode | regex_findall('crs_home=(.+)') | first }}/bin/srvctl config scan"
+    register: _srvctl_config_scan 
+    when:
+      - _olr_file_found.stat.exists
+
+  - name: Set facts from _etc_file_fact
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+    changed_when: _oraInst_file_found.stat.exists
+    register: _set_oracle_facts
+    vars:
+      _system:
+        - key: system
+          value:
+            inventory_loc: "{% if _oraInst_file_found.stat.exists %}{{ _oraInst_file_content.content | b64decode | regex_findall('inventory_loc=(.+)') | first }}{% else %}{{ false | bool }}{% endif %}"
+            inst_group: "{% if _oraInst_file_found.stat.exists %}{{ _oraInst_file_content.content | b64decode | regex_findall('inst_group=(.+)') | first }}{% else %}{{ false | bool }}{% endif %}"
+            oracle_ahf_loc: "{% if _ahf_file_found.stat.exists %}{{ _ahf_file_content.content | b64decode | regex_search('(.+)ahf') }}{% else %}{{ false | bool }}{% endif %}" 
+            dbaascli: "{% if _dbaascli_found.stat.exists %}{{true|bool}}{% else %}{{ false | bool }}{% endif %}"
+            scan_name: "{% if _olr_file_found.stat.exists %}{{ _srvctl_config_scan.stdout | regex_search('SCAN name: (.+),' , '\\1') | first | split(',') | first }}{% else %}{{ false | bool }}{% endif %}"
+            scan_ips:  "{% if _olr_file_found.stat.exists %}{{ _srvctl_config_scan.stdout | regex_findall('IPv4 VIP: (.+)') | join(',') }}{% else %}{{ false | bool }}{% endif %}"
+            crs: "{% if _olr_file_found.stat.exists %}{{ true|bool }}{% else %}{{ false | bool }}{% endif %}"
+            tnslsnr_port: "{{ ansible_facts.tcp_listen | selectattr ('name', 'equalto', 'tnslsnr' ) | selectattr ('address', 'equalto', ansible_default_ipv4['address'] ) | map(attribute='port') | min | default(ansible_facts.tcp_listen | selectattr ('name', 'equalto', 'tnslsnr' ) | selectattr ('address', 'equalto', '0.0.0.0' ) | map(attribute='port') | min) }}"
+
+  # - name: Record system facts 
+  #   delegate_to: localhost
+  #   when: _set_oracle_facts is success
+  #   ansible.builtin.lineinfile:
+  #     path: "{{ playbook_dir }}/host_vars/{{ inventory_hostname }}" 
+  #     regexp: "^{{ item.parameter }}"
+  #     line: "{{ item.parameter }}: {{ item.value }}"
+  #     create: true
+  #   loop: 
+  #     - { parameter: "oracle_facts" , value: "" }
+  #     - { parameter: "  system" , value: "" }
+  #     - { parameter: "    inventory_loc" , value: "{{ oracle_facts.system.inventory_loc }}" }
+  #     - { parameter: "    inst_group" , value: "{{ oracle_facts.system.inst_group }}" }
+  #     - { parameter: "    oracle_ahf_loc" , value: "{{ oracle_facts.system.oracle_ahf_loc }}" }
+  #     - { parameter: "    dbaascli" , value: "{{ oracle_facts.system.dbaascli }}" }
+  #     - { parameter: "    scan_name" , value: "{{ oracle_facts.system.scan_name }}" }
+  #     - { parameter: "    crs" , value: "{{ oracle_facts.system.crs_on }}" }
+  #     - { parameter: "ansible_python_interpreter" , value: "{{ oracle_facts.system.oracle_ahf_loc }}/common/venv/bin/python3" }
+
+  rescue:
+
+  # default is => Fail execution of Playbook
+  - name: Fail execution of system
+    ansible.builtin.fail:
+      msg: >-
+        Set oracle_facts_system_ignore_failed=true in inventory/group_vars/dbservers to disable this fail task.
+    when:
+      - not oracle_facts_system_ignore_failed | default(false)
+
+  - name: Write empty facts to system(rescue from failure above)
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+    vars:
+      _system:
+        - key: system 
+          value:
+            state: failed 
+
+...

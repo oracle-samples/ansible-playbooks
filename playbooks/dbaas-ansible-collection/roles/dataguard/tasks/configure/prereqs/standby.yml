@@ -1,0 +1,70 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Standby Block 
+  when: not database_config.db_role
+  block:
+
+  - name: Set remaining hosts as not missing
+    ansible.builtin.set_fact:
+      dbtarget_success: true
+
+  - name: Save job_report facts under Ansible controller
+    delegate_to: localhost
+    delegate_facts: true
+    set_fact:
+      dbtarget_list: '{{ hostvars | dict2items | json_query(dbtarget_query) }}'
+    vars:
+      dbtarget_query: "[?value.dbtarget_success==`true`].key"
+
+  - name: Set target fact
+    ansible.builtin.set_fact:
+      targetHome: true
+      hostname_target: "{{ hostvars['localhost']['dbtarget_list'] | sort | first }}"
+
+  - name: Set standby facts
+    delegate_to: localhost
+    delegate_facts: true
+    ansible.builtin.set_fact:
+      standby:
+        scan_name:          "{{ grid_config.scan_name | default(hostname_target) }}"
+        scan_ip_addresses:  "{{ grid_config.scan_ips | default(ansible_default_ipv4['address']) }}"
+        scan_port:          "{{ grid_config.tnslsnr_port | default(oracle_facts.system.tnslsnr_port) }}"
+        db_unique_name:     "{{ db_name }}_{{ db_unique_name_standby_suffix | default(inventory_hostname_short[-6:]) }}"
+        db_domain:          "{{ hostvars['localhost']['primary']['db_domain'] }}"
+    when: ansible_hostname in hostname_target
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Standby facts
+        -----------------
+        {{ hostvars['localhost']['standby'] }} 
+        ==================================================
+    when: ansible_hostname in hostname_target
+    tags: [print_action]
+
+  - name: Assert that standby facts are defined
+    ansible.builtin.assert:
+      quiet: true
+      that:
+        - hostvars['localhost']['standby'] is defined
+      fail_msg: "Standby facts are NOT defined"
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

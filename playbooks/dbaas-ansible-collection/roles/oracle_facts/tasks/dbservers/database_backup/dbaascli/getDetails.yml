@@ -1,0 +1,56 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCLI database getdetails 
+  become: true
+  shell: "dbaascli database getDetails --db_name {{ db_name }} --reload --showOutputDelimiter | sed -n '/Start of output/, /End of output/{ /Start of output/! { /End of output/! p }}'" 
+  register: _dbaascli_database_getDetails
+
+- name: Write DB facts from _dbaascli_database_getDetails
+  ansible.builtin.set_fact:
+    cacheable: false
+    database_facts: "{{ database_facts | default({}) | combine(_database | items2dict) }}"
+  when: 
+    - _dbaascli_database_getDetails is defined
+    - _dbaascli_database_getDetails.stdout | length > 0
+  vars:
+    _database:
+      - key: "{{ db_name }}" 
+        value: "{{ _dbaascli_database_getDetails.stdout }}"
+
+- debug:
+    msg: "{{ output | split('\n') | default('Database not found') }}" 
+  vars:
+    output: | 
+      ==================================================
+      DBaasCLI Oracle Database Facts
+      -----------------
+      db_name: {{ database_facts[db_name].db_name }}
+      dbUniqueName: {{ database_facts[db_name].dbUniqueName }}
+      db_role: {{ database_facts[db_name].db_role }}
+      dgEnabled: {{ database_facts[db_name].dgEnabled }}
+      patchVersion: {{ database_facts[db_name].patchVersion }}
+      dbNodeLevelDetails:
+        nodeName: {{ database_facts[db_name].dbNodeLevelDetails | json_query('*.nodeName') | join(',') }}
+        instanceName: {{ database_facts[db_name].dbNodeLevelDetails | json_query('*.instanceName') | join(',') }}
+        version: {{ database_facts[db_name].dbNodeLevelDetails | json_query('*.version') | unique() | join(',') }}
+        homePath: {{ database_facts[db_name].dbNodeLevelDetails | json_query('*.homePath') | unique() | join(',') }}
+        status: {{ database_facts[db_name].dbNodeLevelDetails | json_query('*.status') | unique() | join(',') }}
+      PDBs:
+        pdb_name: {{ database_facts[db_name].pdbs | json_query('*.pdb_name') | join(',') }} 
+      ==================================================
+  when:
+    - ansible_hostname in grid_config.master_node
+    - _dbaascli_database_getDetails is defined
+    - _dbaascli_database_getDetails.stdout | length > 0
+
+...

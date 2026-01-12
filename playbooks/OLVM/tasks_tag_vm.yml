@@ -1,0 +1,11 @@
+---
+
+- name: "Insert all tags for VM {{ vm_node }}"
+  ovirt.ovirt.ovirt_tag:
+    auth: "{{ ovirt_auth }}"
+    name: "{{ item }}"
+    state: attached
+    vms:
+      - "{{ vm_node }}"
+  with_items: "{{ hostvars[vm_node]['vm_tags'] }}"
+  when: hostvars[vm_node]['vm_tags'] is defined

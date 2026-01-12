@@ -35,12 +35,13 @@
         memory: "{{ vm_ram }}"
         cpu_sockets: "{{ vm_cpu }}"
         high_availability: true
+        clone: "{{ vm_disk_cloned | default(false) }}"
         state: running
         wait: yes
         cloud_init:
           host_name: "{{ vm_name + '.' + vm_dns_domain }}"
-          root_password: "{{ vm_root_passwd }}"
           user_name: "{{ vm_user }}"
+          root_password: "{{ vm_passwd }}"
           authorized_ssh_keys: "{{ vm_user_sshpubkey }}"
           dns_servers: "{{ vm_dns }}"
           dns_search: "{{ vm_dns_domain }}"

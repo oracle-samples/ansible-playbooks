@@ -1,9 +1,9 @@
 # OLVM - Ansible Playbooks for Oracle Linux Virtualization 
 
 
-A collection of Ansible playbooks to use with Oracle Linux Virtualization Manager. Playbooks are tested with Ansible CLI commands on Oracle Linux and with Oracle Linux Automation Manager.
+A collection of example Ansible playbooks to use with Oracle Linux Virtualization Manager. Playbooks are tested with Ansible CLI commands on Oracle Linux and with Oracle Linux Automation Manager.
 
-The playbooks uses modules from the [`ovirt.ovirt` Ansible collection](https://docs.ansible.com/ansible/latest/collections/ovirt/ovirt/index.html) which should be downloaded before using the playbooks. Read the collection documentation page for additional explanation or for extending the functionality of the playbooks.
+The playbooks uses modules from the [ovirt.ovirt Ansible collection](https://docs.ansible.com/ansible/latest/collections/ovirt/ovirt/index.html) which should be downloaded before using the playbooks. Read the collection documentation page for additional explanation or for extending the functionality of the playbooks.
 
 ## How to use the playbooks
 
@@ -11,64 +11,87 @@ The playbooks uses modules from the [`ovirt.ovirt` Ansible collection](https://d
 
 First step is the configuration of the playbook variables which are mostly configured in ``default_vars.yml`` file. Variables may be used in the command line when not configured in the default variables file. Variables are required to configure your infrastructure settings for the OLVM server, VM configuration and cloud-init. See below table for explanation of the variables. 
 
-For example, the playbooks can be used like this (adjust variables to your infrastructure):
+Run the playbooks in a python virtual environment, it can be used like this:
 
-    $ git clone https://github.com/oracle-samples/ansible-playbooks.git ol-playbooks
-    $ cd ol-playbooks/playbooks/OLVM
-    $ ansible-galaxy collection install -f ovirt.ovirt
-    $ ansible-galaxy collection install -f community.general
-    $ vi default_vars.yml
-    $ export "OVIRT_URL=https://olvm-engine.demo.local/ovirt-engine/api"
-    $ export "OVIRT_USERNAME=admin@internal"
-    $ export "OVIRT_PASSWORD=CHANGE_ME"
+```console
+# create python virtual environment
+$ python3 -m venv venv
+$ source venv/bin/activate
+$ pip install ansible
+$ source venv/bin/activate
+$ ansible-galaxy collection install -f ovirt.ovirt
+$ ansible-galaxy collection install -f community.general
 
-    # create a single VM
-    $ ansible-playbook -i olvm-engine.demo.local, -u opc --key-file ~/.ssh/id_rsa \
-        -e "vm_name=vm01" -e "vm_ip_address=192.168.1.101" \
-        olvm_create_one_vm.yml
+# download playbooks repository
+$ git clone https://github.com/oracle-samples/ansible-playbooks.git ol-playbooks
 
-    # create multiple VMs with inventory file, see example hosts.ini file
-    $ ansible-playbook -i inventory/hosts.ini -u opc --key-file ~/.ssh/id_rsa \
-        olvm_create_multiple_vms.yml
+# setup and customize variables
+$ cd ol-playbooks/playbooks/OLVM
+$ vi default_vars.yml
+$ export "OVIRT_URL=https://OLVM-FQDN/ovirt-engine/api"
+$ export "OVIRT_USERNAME=admin@internal"
+$ export "OVIRT_PASSWORD=CHANGE_ME"
+$ cat << EOF >> hosts.ini
+[olvm]
+olvm-engine.demo.local
+EOF
+# create a single VM
+$ ansible-playbook -i hosts.ini -u opc --key-file ~/.ssh/id_rsa \
+    -e "vm_name=vm01" -e "vm_ip_address=192.168.1.101" \
+    olvm_create_one_vm.yml
 
-    # delete a VM
-    $ ansible-playbook -i olvm-engine.demo.local, -u opc --key-file ~/.ssh/id_rsa \
-        -e "vm_name=vm01" olvm_delete_vm.yml
+# create multiple VMs with inventory file, see example hosts-example.ini file
+$ ansible-playbook -i inventory/hosts-example.ini -u opc --key-file ~/.ssh/id_rsa \
+    olvm_create_multiple_vms.yml
 
-    # live migrate a VM
-    $ ansible-playbook -i olvm-engine.demo.local, -u opc --key-file ~/.ssh/id_rsa \
-        -e "vm_name=vm01" -e "dst_kvmhost=KVM2" olvm_migrate_vm.yml
+# delete a VM
+$ ansible-playbook -i hosts.ini -u opc --key-file ~/.ssh/id_rsa \
+    -e "vm_name=vm01" olvm_delete_vm.yml
 
-Note 1: using the OLVM server FQDN (in this example olvm-engine.demo.local), appended with a comma, is a quick-way to not use a inventory file.
+# live migrate a VM
+$ ansible-playbook -i hosts.ini -u opc --key-file ~/.ssh/id_rsa \
+    -e "vm_name=vm01" -e "dst_kvmhost=KVM2" olvm_migrate_vm.yml
 
-Note 2: as it includes clear-text password, for better security you may want to encrypt the ``default_vars.yml`` file with the `ansible-vault` command. When running the playbook, Ansible asks for a secret to decrypt the YAML file.
+# live storage migration, all VM disks from a source domain to a destination domain
+$ ansible-playbook -i hosts.ini -u opc --key-file ~/.ssh/id_rsa \
+    --extra-vars "src_storage=XXX" \
+    --extra-vars "dst_storage=YYY"   olvm_migrate_storagedomain.yml
+```
 
-    $ ansible-vault encrypt default_vars.yml
-    $ ansible-playbook -i olvm-engine.demo.local, -u opc --key-file ~/.ssh/id_rsa \
-        -e "vm_name=oltest" -e "vm_ip_address=192.168.1.100" \
-        --ask-vault-pass olvm_create_single_vm.yml
+Note 1: for live storage migration ensure for thin-provisioned disks (depending on a template) you first copy the template to the destination storage domain before running the playbook.
+
+Note 2: as it includes clear-text password, for better security you may want to encrypt the ``default_vars.yml`` file with the ansible-vault command. When running the playbook, ansible asks for a secret to decrypt the yml-file.
+
+```
+$ ansible-vault encrypt default_vars.yml
+$ ansible-playbook -i hosts.ini -u opc --key-file ~/.ssh/id_rsa \
+    -e "vm_name=oltest" -e "vm_ip_address=192.168.1.100" \
+    --ask-vault-pass olvm_create_single_vm.yml
+```
 
 ### Oracle Linux Automation Manager
 
 #### Project:
-In Oracle Linux Automation Manager you can directly import the playbook repository from GitHub as project. The top-level directory of the repository contains the requirements file to download the `ovirt.ovirt` ansible collection.
+In Oracle Linux Automation Manager you can directly import the playbook repository from Github as Project. The top-level directory of the repository contains the requirements file to download the ovir.ovirt ansible collection.
 
 #### Inventory:
 Create an inventory and add one host with the details of your OLVM server, this is the target host were you run the playbook. Make sure you have a Machine credential setup for this host so that ansible can SSH to it (run the ping Module for this host). For the VMs you want to create add an  inventory group ``[instances]`` and add the VM names including hostvars for ``vm_name`` and ``vm_ip_address``.
 
 #### Credentials:
-Besides the standard SSH credential to access the target host, an additional credential is required to use the ovirt modules in the playbooks. It's based on credential type ``Red Hat Virtualization`` and you need to fill in the OLVM FQDN, username, password and CA File. For example:
+Add the standard SSH credential to access the target host, an additional credential is required to use the ovirt modules in the playbooks. It's based on credential type ``Red Hat Virtualization`` and you need to fill in the OLVM FQDN, username, password and CA File. For example:
 
     Host (Authentication URL): 	https://olvm-engine.demo.local/ovirt-engine/api
     Username:			admin@internal
     Password:			CHANGE_ME
+
+For better password security you can add an additional credential type for passwords which will be used for extra_vars.
 
 #### Templates:
 Create a new job template and provide the following information:
 
     Inventory:		Select the inventory containing the OLVM host
     Project:		Select project from the Github repository
-    Playbook:		Select playbook from Project, for example olvm_create_single_vm.yml
+    Playbook:		Select playbook from Project, for example olvm_create_one_vm.yml
     Credentials:		Select Machine (SSH) credential and the Virtualization credentials
     Variables:		Enter the variables as used in the example default_vars.yml file
 
@@ -96,18 +119,21 @@ The CA file can be downloaded from the main OLVM web portal or directly from the
 | vm_ip_address | 192.168.1.100 | Static IP address of VM, if DHCP is required cloud-init section in playbook should be changed
 | vm_ram | 2048MiB | Amount of memory of the VM
 | vm_cpu | 4 | Number of virtual CPUs sockets of the VM
-| vm_root_passwd | your_secret_root_pw | Root password of the VM, used bu cloud-init
 | vm_dns | 192.168.1.3 | DNS server to be used for VM
 | vm_dns_domain | demo.local | DNS domainto to be used for VM
 | vm_gateway | 192.168.1.1 | Default gateway to be used for VM
 | vm_netmask | 255.255.255.0 | Netmask to be used for VM
 | vm_timezone | Europe/Amsterdam | Timezone for VM
 | vm_user | opc | Standard user for Oracle provided template, otherwise use your own or root user
+| vm_passwd | your_secret_pw | Password of defined VM user, used by cloud-init
 | vm_user_sshpubkey | "ssh-rsa AAAA...YOUR KEY HERE...hj8= " | SSH Public key for stndard user
+| vm_tags | ["web", "marketing"] | List og tags to assign to VM
 | src_vm | oltest | VM used as source VM for cloning operation
 | src_vm_snapshot | base_snapshot | Name of snapshot of source VM, for cloning operation 
 | dst_vm | oltest_cloned | Name of destination VM for cloning operation
 | dst_kvmhost | KVM2 | Name (not hostname) of kvm host in OLVM cluster and destination for live-migration
+| src_storage | VMdomain1 | Name of the source storage domain used for live storage migration
+| dst_storage | VMdomain2 | Name of the destination storage domain used for live storage migration
 | vm_id | 76c76c8b-a9ad-414e-8274-181a1ba8948b | VM ID for the VM, used for rename of VM
 | vm_newname | oltest | New name for VM with vm_id, used for rename of VM
 | olvm_insecure | false | By default ``true``, but define ``false`` in case you need secure API connection

@@ -1,0 +1,23 @@
+---
+
+- name: "Gather information about VM {{ vm.id }}"
+  ovirt.ovirt.ovirt_vm_info:
+    auth: "{{ ovirt_auth }}"
+    pattern: id="{{vm.id}}"
+    fetch_nested: true
+    nested_attributes: "'disks'"
+    #follow: ['disks']
+  register: vm_info
+
+- name: "Print gathered information about VM {{ vm_info.ovirt_vms[0].name }}"
+  ansible.builtin.debug:
+    msg: "{{vm_info.ovirt_vms[0]}}"
+    verbosity: 1
+
+- name: "Live migrate disk(s) from VM {{ vm_info.ovirt_vms[0].name }} (to {{ dst_storage }})"
+  ovirt.ovirt.ovirt_disk:
+    auth: "{{ ovirt_auth }}"
+    id: "{{ item.id }}"
+    storage_domain: "{{ dst_storage }}"
+  loop: "{{ vm_info.ovirt_vms[0].disk_attachments }}"
+

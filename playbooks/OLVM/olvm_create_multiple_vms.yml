@@ -33,8 +33,8 @@
         wait: yes
         cloud_init:
           host_name: "{{ hostvars[item]['vm_name'] + '.' + vm_dns_domain }}"
-          root_password: "{{ vm_root_passwd }}"
           user_name: "{{ vm_user }}"
+          root_password: "{{ vm_passwd }}"
           authorized_ssh_keys: "{{ vm_user_sshpubkey }}"
           dns_servers: "{{ vm_dns }}"
           dns_search: "{{ vm_dns_domain }}"
@@ -50,6 +50,12 @@
               - yum -y remove cloud-init
         wait: true
       loop: "{{ groups['instances'] }}"
+
+    - name: Tag Virtual Machine
+      ansible.builtin.include_tasks: "tasks_tag_vm.yml"
+      loop: "{{ groups['instances'] }}"
+      loop_control:
+        loop_var: vm_node
 
     - name: Cleanup OLVM auth token
       ovirt.ovirt.ovirt_auth:

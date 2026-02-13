@@ -1,0 +1,30 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- hosts: "{{ target | default('dbservers')}}"
+  gather_facts: false
+
+  vars_prompt:
+    - name: db_sys_password 
+      prompt: Enter db_sys_password 
+      unsafe: true
+      private: true
+      confirm: true
+
+  collections:
+    - oracle.dbaas 
+
+  roles:
+    - oracle_facts
+    - database 
+
+...

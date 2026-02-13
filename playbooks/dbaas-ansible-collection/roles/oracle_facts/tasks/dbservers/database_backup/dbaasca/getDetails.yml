@@ -1,0 +1,234 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+# TODO:
+# srvctl config database -db DB0528_gh7_zrh -S 1
+
+- name: Discover database DB_UNIQUE_NAME
+  shell: "$ORACLE_HOME/bin/srvctl config database"
+  # when: database_config.db_role is defined 
+  register: _database_unique_name_output
+  failed_when: _database_unique_name_output.rc > 1 
+  become: true
+  environment: "{{ grid_env }}"
+
+- name: Set _dbUniqueName fact
+  set_fact: 
+    _dbUniqueName: "{{ item | regex_search(db_name + '(.+)') }}"
+  with_items: "{{ _database_unique_name_output.stdout_lines }}"
+  when: 
+    # - database_config.db_role is defined
+    - _database_unique_name_output is defined
+    - _database_unique_name_output.stdout is iterable
+    - _database_unique_name_output.stdout | length > 0
+
+- name: Discover database oracle_home  
+  shell: "$ORACLE_HOME/bin/srvctl config database -home | awk '{ print $1,$2 }'"
+  register: _srvctl_config_database 
+  when: 
+    - _dbUniqueName is defined
+    - _dbUniqueName | length > 0
+  become: true
+  environment: "{{ grid_env }}"
+
+- name: Set _oracle_home fact
+  set_fact: 
+    _oracle_home: "{{ _srvctl_config_database.stdout | regex_findall(_dbUniqueName + ' (.*)') | first }}"
+    # _oracle_home: "{{ item | regex_search(db_name + '(.*)') | split(' ') | last }}"
+  # with_items: "{{ _srvctl_config_database.stdout_lines }}"
+  when: 
+    - _dbUniqueName is defined
+    - _dbUniqueName | length > 0
+    - _srvctl_config_database.changed|bool
+
+- name: Discover database OS user
+  ansible.builtin.stat:
+    path: "{{ _oracle_home }}/bin/oracle"
+  when: 
+    - _dbUniqueName is defined
+    - _dbUniqueName | length > 0
+    - _srvctl_config_database.changed|bool
+  register: _oracle_home_user
+
+- name: Discover DBaasCA facts
+  when:
+    - _dbUniqueName is defined
+    - _dbUniqueName | length > 0
+    - _srvctl_config_database.changed|bool
+    - _oracle_home is defined
+  become: true
+  become_user: "{{ _oracle_home_user.stat.pw_name }}"
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment:    
+    ORACLE_HOME: "{{ _oracle_home }}" 
+  block:
+
+    - name: Discover database dbnode list
+      shell: "{{ _oracle_home }}/bin/srvctl status database -db {{ _dbUniqueName }} | grep 'is running on node' | awk '{print $NF}' | sort -r | tail -1"
+      register: _dbnode_list
+
+    - name: Discover database config 
+      command: "{{ _oracle_home }}/bin/srvctl config database -db {{ _dbUniqueName }}"
+      register: _database_details
+
+    - name: Discover instance status
+      shell: "{{ _oracle_home }}/bin/srvctl status instance -db {{ _dbUniqueName }} -node {{ ansible_hostname }}"
+      register: _srvctl_status_instance 
+      failed_when:
+        - _srvctl_status_instance.rc != 0 
+        - not (('PRCD-1035' in _srvctl_status_instance.stdout) or
+          ('PRKO-3133' in _srvctl_status_instance.stdout))
+        # PRCD-1035 : Database DB0121_hnx_dxb is not a cluster database
+        # PRKO-3133 : Database DB0520_zgpv has no instance on node sazrhdb32
+    
+    - name: Set _instance_name fact
+      ansible.builtin.set_fact: 
+        _instance_name: "{{ (_srvctl_status_instance.rc == 0) | ternary((_srvctl_status_instance.stdout | regex_findall('Instance (.*) is running on node') | first), (_database_details.stdout | regex_findall('Database instance: (.*)') | first)) | default('no_instanace_found') }}" 
+
+    - name: Discover database parameters 
+      shell: |
+        {{ _oracle_home }}/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF DELIMITER :" -nologintime "/ as sysdba" << EOF 
+        select name,value
+        from v\$parameter
+        where name in ('processes','pga_aggregate_target','sga_target','db_recovery_file_dest_size','wallet_root');
+        exit
+        EOF
+      environment:    
+        ORACLE_SID: "{{ _instance_name }}"
+      when: _database_details.rc == 0
+      register: _database_parameters
+      failed_when: 
+        # ORA-01034: ORACLE not available
+        - _database_parameters.rc != 0 
+        - "'ORA-01034' not in _database_parameters.stdout"
+
+    - name: Select from v$database 
+      shell: |
+        {{ _oracle_home }}/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF" -nologintime "/ as sysdba" << EOF 
+        select open_mode,flashback_on from v\$database;
+        exit
+        EOF
+      environment:    
+        ORACLE_SID: "{{ _instance_name }}"
+      when: 
+        - _database_details.rc == 0
+        - "'ORA-01034' not in _database_parameters.stdout"
+      register: _v_database_ouput
+      failed_when: 
+        # ORA-01034: ORACLE not available
+        - _v_database_ouput.rc != 0 
+        - "'ORA-01034' not in _v_database_ouput.stdout"
+    
+    # - name: Check open mode of database
+    #   oracle_sqlplus_module:
+    #     oracle_home: "{{ _oracle_home }}"
+    #     oracle_sid: "{{ _instance_name }}"
+    #     sql_statement: 'select open_mode from v$database;'
+    #   environment:    
+    #     ORACLE_SID: "{{ _instance_name }}"
+    #     ORACLE_HOME: "{{ _oracle_home }}" 
+    #   ignore_errors: true
+
+    - name: Get oraversion full version 
+      shell: |
+        {{ _oracle_home }}/bin/oraversion -compositeVersion
+      when: _oracle_home is defined
+      register: _oraversion
+
+    - name: Write facts to database_facts
+      ansible.builtin.set_fact:
+        cacheable: false
+        database_facts: "{{ database_facts | default({}) | combine(_db_facts | items2dict) }}"
+      when:
+        - _dbUniqueName is defined
+        - _dbUniqueName | length > 0
+        - _database_details.rc == 0
+        - _instance_name != "no_instanace_found"
+        - "'ORA-01034' not in _database_parameters.stdout" 
+      vars:
+        _db_facts:
+          - key: "{{ db_name }}" 
+            value:
+              db_name:               "{{ db_name }}"
+              dbUniqueName:         "{{ _database_details.stdout    | regex_findall('Database unique name: (.*)') | first }}"
+              db_role:               "{{ _database_details.stdout    | regex_findall('Database role: (.*)') | first }}"
+              dbDomain:             "{{ _database_details.stdout    | regex_findall('Domain: (.*)') | first }}" 
+              dbType:               "{{ _database_details.stdout    | regex_findall('Type: (.*)') | first }}"
+              disk_groups:          "{{ _database_details.stdout    | regex_findall('Disk Groups: (.*)') | first }}"
+              mount_point_paths:    "{{ _database_details.stdout    | regex_findall('Mount point paths: (.*)') | first }}"
+              Services:             "{{ _database_details.stdout    | regex_findall('Services: (.*)') | first  }}"
+              master_node:          "{{ _database_details.stdout    | regex_findall('Configured nodes: (.*)') | first | split(',') | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname') ) | sort | first }}"
+              user:                 "{{ _oracle_home_user.stat.pw_name }}"
+              patchVersion:       "{{ _oraversion.stdout }}" 
+              homePath:           "{{ _database_details.stdout    | regex_findall('Oracle home: (.*)') | first }}"
+              openMode:           "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('OPEN_MODE') | default('') | replace(' ','_') }}"
+              flashbackMode:           "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('FLASHBACK_ON') | default('OFF') }}"
+              tdeDetails:
+                walletRootEnabled:    "{% if (_database_parameters.stdout | regex_findall('wallet_root:(.*)') | first) | length > 0 %}TRUE{% else %}FALSE{% endif %}"
+                walletLocation:       "{{ _database_parameters.stdout | regex_findall('wallet_root:(.*)') | first }}"
+              dbNodeLevelDetails:
+                homePath:           "{{ _database_details.stdout    | regex_findall('Oracle home: (.*)') | first }}"
+                patchVersion:       "{{ _oraversion.stdout }}" 
+                instanceName:       "{{ _instance_name | default('no_instanace_found') }}"
+                openMode:           "{{ _v_database_ouput.stdout[1:] | community.general.from_csv | first | community.general.json_query('OPEN_MODE') | replace(' ','_') }}"
+      register: _database_facts
+
+    - debug:
+        msg: "{{ output | split('\n') | default('Database not found') }}" 
+      vars:
+        output: | 
+          ==================================================
+          DBaasCA Oracle Database Facts
+          -----------------
+          dbUniqueName: {{ database_facts[db_name].dbUniqueName }}
+          db_role: {{ database_facts[db_name].db_role }}
+          dbType: {{ database_facts[db_name].dbType }}
+          homePath: {{ database_facts[db_name].homePath }}
+          flashbackMode: {{ database_facts[db_name].flashbackMode }}
+          openMode: {{ database_facts[db_name].openMode }}
+          tdeDetails:
+            walletRootEnabled: {{ database_facts[db_name].tdeDetails.walletRootEnabled }}  
+            walletLocation: {{ database_facts[db_name].tdeDetails.walletLocation }}  
+          dbNodeLevelDetails:
+            instanceName: {{ database_facts[db_name].dbNodeLevelDetails.instanceName }}
+            patchVersion: {{ database_facts[db_name].dbNodeLevelDetails.patchVersion }}
+            homePath: {{ database_facts[db_name].dbNodeLevelDetails.homePath }}
+            status: {{ database_facts[db_name].dbNodeLevelDetails.openMode }}
+          ==================================================
+      when:
+        - ansible_hostname in grid_config.master_node
+        - database_facts is defined
+
+  rescue:
+    # default is
+    # => Fail execution of Playbook
+    - name: Fail execution of oradb_facts
+      ansible.builtin.fail:
+        msg: >-
+          Set oradb_facts_ignore_unreachable=false in db_name
+          to disable this fail task.
+      when:
+        - not _odb_loop_helper.oradb_facts_ignore_unreachable | default(false)
+
+    - name: Write empty facts to oracledb.db_unique_name (rescue from failure above)
+      ansible.builtin.set_fact:
+        cacheable: false
+        database_facts: "{{ database_facts | default({}) | combine(_db_facts | items2dict) }}"
+      vars:
+        _db_facts:
+          - key: "{{ db_name }}" 
+            value:
+              state: unreachable
+
+...

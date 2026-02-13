@@ -1,0 +1,66 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: assert oracle_meta_assert_grid
+  when:
+    - oracle_meta_assert_grid | default(true)
+    - oracle_facts.grid.state is defined
+  tags:
+    - always
+    - oracle_assert 
+  block:
+
+    - name: Assert Grid Infrasructure 
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - orafac.state == 'NORMAL' 
+          # - orafac.activeVersion|split('.')|first|int == orafac.patchVersion|split('.')|first|int
+      with_items:
+        - "{{ oracle_facts.grid }}"
+      loop_control:
+        label: "{{ oracle_facts.grid | default('') }}"
+        loop_var: orafac 
+
+    - name: Verify you are using a supported Oracle Grid Infrastructure
+      ansible.builtin.assert:
+        that:
+          - oracle_facts.grid['activeVersion'] is version(oracle_grid_infrastructure, '>=')
+        success_msg: Oracle Grid Infrastructure {{ oracle_facts.grid['activeVersion'] }} is supported.
+        fail_msg: Oracle Grid Infrastructure {{ oracle_facts.grid['activeVersion'] }} has reached End of Life (EoL). Please upgrade to a supported Ansible release. Check the README for more details.
+
+    # - pause:
+    #     seconds: 0
+    #     prompt: |
+    #       ==================================================
+    #       Oracle Grid Infrastructure 
+    #       {% for host in ansible_play_hosts %}
+    #       -----------------
+    #         Hostname:         {{ inventory_hostname }}
+    #         Stage:            {{ hostvars[host]['oracle_facts']['grid']['state'] }}
+    #         Activie Version:  {{ hostvars[host]['oracle_facts']['grid']['activeVersion'] }}
+    #       {% endfor %}
+    #       ==================================================
+    #   tags: [print_action]
+
+
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of oracle_meta
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_meta_assert_grid=false in inventory/group_vars/all to disable this fail task.
+      when:
+        - oracle_meta_assert_grid | default(true)
+
+...

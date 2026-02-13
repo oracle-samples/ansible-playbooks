@@ -1,0 +1,157 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Standby DB Block 
+  delegate_to: localhost
+  delegate_facts: true
+  when:  database_config.db_role == 'physical_standby'
+  block:
+
+  - name: Set standby facts
+    ansible.builtin.set_fact:
+      standby:
+        db_unique_name: "{{ database_config.db_unique_name }}"
+        db_domain: "{{ database_config.db_domain }}"
+    
+- name: DG Block 
+  become: true
+  become_user: oracle
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment: "{{ oracle_env }}" 
+  when: 
+    - hostvars['localhost']['standby']['db_unique_name'] is defined
+    - database_config.db_role == 'primary'
+  block:
+
+  - name: DBaasCA deregisterStandby 
+    command: >
+      {{ dbaasca }}
+      -silent 
+      -configureDatabase
+      -deregisterStandby
+      -dgTNSNamesoraFilePath {% if acfs_mount_point is defined %}{{ acfs_mount_point }}/{{ db_name }}{% else %}{{ database_config.oracle_home }}/network/admin{% endif %}
+      -sourceDB {{ database_config.db_unique_name }}
+      -standbydb_unique_name {{ hostvars['localhost']['standby']['db_unique_name'] }}
+      -standbydb_domain {{ hostvars['localhost']['standby']['db_domain'] }}
+    register: deregisterStandby_output
+    timeout: 300 
+    failed_when: false
+    ignore_errors: true
+      # - deregisterStandby_output.failed is true 
+      # - "'The command action failed to execute in the expected time frame' not in deregisterStandby_output.msg"  
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA deregisterStandby 
+        -----------------
+        {{ deregisterStandby_output.stdout }} 
+        ==================================================
+    when: deregisterStandby_output.changed
+
+- name: Standby Block
+  become: true
+  become_user: oracle
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment: "{{ oracle_env }}"
+  when: 
+    - "'standby' in ansible_run_tags" 
+    - database_config.db_role == 'physical_standby' 
+  block:
+
+  - name: Standby - Validate DG configuration
+    shell: "{{  database_config.oracle_home }}/bin/dgmgrl / 'show configuration' -json" 
+    register: dgmgrl_show_config 
+    failed_when: false 
+
+  - name: Standby - DBaasCA deleteDatabase
+    expect:
+      command: >
+        {{ dbca }}
+        -deleteDatabase 
+        -silent 
+        -sourceDB {% if database_config.db_type == 'rac' %}{{ database_config.db_unique_name }}{% else %}{{ database_config.instance_name }}{% endif %}
+        -sysDBAUserName {{ db_sys_user }}
+        -forceArchiveLogDeletion
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: deleteDatabase_standby_output
+    # when: "'Configuration details cannot be determined by DGMGRL' in dgmgrl_show_config.stdout"
+    # failed_when: "'Database deletion completed.' not in deleteDatabase_standby_output.stdout" 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA deleteDatabase Standby
+        -----------------
+        {{ deleteDatabase_standby_output.stdout }} 
+        ==================================================
+    when: deleteDatabase_standby_output.changed
+
+  - name: Standby - Remove DB Env File
+    file:
+      path: "~/{{ db_name }}.env"
+      state: absent
+
+- name: Primary Block
+  become: true
+  become_user: oracle
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment: "{{ oracle_env }}"
+  when:
+    - "'primary' in ansible_run_tags" 
+    - database_config.db_role == 'primary' 
+  block:
+
+  - name: Primary - DBaasCA deleteDatabase 
+    expect:
+      command: >
+        {{ dbca }}
+        -deleteDatabase 
+        -silent 
+        -oui_internal
+        -sourceDB {{ if database_config.db_type == 'rac' | ternary(database_config.db_unique_name, database_config.instance_name ) }} 
+        -sysDBAUserName {{ db_sys_user }}
+        -forceArchiveLogDeletion
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: deleteDatabase_output
+    failed_when: "'Database deletion completed.' not in deleteDatabase_output.stdout"
+    # -sysDBAPassword {{ db_sys_password }}
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA deleteDatabase
+        -----------------
+        {{ deleteDatabase_output.stdout }} 
+        ==================================================
+    when: deleteDatabase_output.changed
+
+  - name: Primary - Remove DB Env File
+    file:
+      path: "~/{{ db_name }}.env"
+      state: absent

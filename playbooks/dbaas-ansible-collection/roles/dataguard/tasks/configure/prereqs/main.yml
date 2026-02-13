@@ -1,0 +1,31 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Primary and Standby Block 
+  block:
+
+  - name: Install pexpect 
+    pip: 
+      name: pexpect
+
+  - name: Primary 
+    ansible.builtin.include_tasks: primary.yml
+
+  - name: Standby 
+    ansible.builtin.include_tasks: standby.yml
+    
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

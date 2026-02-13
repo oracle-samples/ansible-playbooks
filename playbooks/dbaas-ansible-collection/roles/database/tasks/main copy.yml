@@ -1,0 +1,149 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI 
+  become: true
+  when: 
+    - oracle_facts.server.dbservers
+    # - db_name_list is defined 
+    - system_config.dbaascli_on | bool 
+    - grid_config.master_node in ansible_hostname
+  block:
+
+    - name: AHF configure 
+      import_tasks: ahf_configure.yml 
+      tags: ahf_configure
+
+    - name: dbaascli gridhome create
+      import_tasks: dbaascli_gridhome_create.yml 
+      when: targetVersion is defined
+      tags: gridhome_create 
+
+    - name: dbaascli gridHome upgrade 
+      import_tasks: dbaascli_gridhome_upgrade.yml 
+      when: targetVersion is defined
+      tags: gridhome_upgrade
+
+    - name: DBaaSCLI dbhome create  
+      include_tasks: 
+        file: dbaascli_dbhome_create.yml
+        apply:
+          tags: [dbhome_create, database_create]
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      # when: (ansible_hostname == primary_node|default('not defined')) or
+      #     (ansible_hostname == standby_node|default('not defined'))
+      tags:
+        - dbhome_create
+        - database_create
+
+    - name: DBaaSCLI database create 
+      include_tasks:
+        file: dbaascli_database_create.yml 
+        apply:
+          tags: database_create 
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      # when: 
+      #   - database_config.db_role is not defined
+      #   - ansible_hostname == primary_node
+      tags: database_create
+
+    - name: dbaascli database move
+      include_tasks:
+        file: database_move.yml  
+        apply:
+          tags: database_move 
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      when: 
+        - targetHome is defined 
+        - db_role is defined
+      tags: database_move 
+
+    - name: DBaaSCLI command run
+      include_tasks:
+        file: dbaascli_command_run.yml  
+        apply:
+          tags: dbaascli 
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      when: 
+        - dbaascli_command is defined
+      tags: dbaascli
+
+    - name: DBaaSCLI database delete 
+      include_tasks:
+        file: dbaascli_database_delete.yml  
+        apply:
+          tags: [database_delete, database_delete_primary, database_delete_standby] 
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      when: 
+        - database_config.db_role is defined
+      tags: [database_delete, database_delete_primary, database_delete_standby] 
+
+- name: DBaaSCA
+  become: true
+  when: 
+    - oracle_facts.server.dbservers
+    # - db_name_list is defined 
+    - not system_config.dbaascli_on | bool 
+    - grid_config.master_node in ansible_hostname
+  block:
+
+    - name: AHF configure 
+      import_tasks: ahf_configure.yml 
+      tags: ahf_configure
+
+    - name: DBaaSCA dbhome create 
+      include_tasks: 
+        file: dbaasca_dbhome_create.yml
+        apply:
+          tags: [dbhome_create, database_create]
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: db_name 
+      # when: (ansible_hostname == primary_node|default('not defined')) or
+      #     (ansible_hostname == standby_node|default('not defined'))
+      tags:
+        - dbhome_create
+        - database_create
+
+    - name: DBaaSCA database create 
+      include_tasks:
+        file: dbaasca_database_create.yml  
+        apply:
+          tags: database_create 
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: _db_name 
+      when: 
+        - targetHome is defined 
+        - db_role is not defined
+        - ansible_hostname == primary_node
+      tags: database_create
+
+    - name: DBaaSCA database delete 
+      include_tasks:
+        file: dbaasca_database_delete.yml  
+        apply:
+          tags: [database_delete, database_delete_primary, database_delete_standby]
+      with_items: "{{ db_name_list }}"
+      loop_control:
+        loop_var: _db_name 
+      tags: [database_delete, database_delete_primary, database_delete_standby] 

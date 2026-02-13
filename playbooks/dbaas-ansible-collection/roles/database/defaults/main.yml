@@ -1,0 +1,7 @@
+#SPDX-License-Identifier: MIT-0
+---
+# defaults file for dbaas
+
+timeline_task_name: "{{ dbaascli_command | split(' --') | first | replace(' ','_') }}"
+sysdate: "{{ '%Y-%m-%dT%H:%M:%S%z' | strftime( now(utc=false).strftime('%s') ) }}"
+db_role_flag: defined 

@@ -1,0 +1,48 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- hosts: '{{target|default("dbservers")}}' 
+
+  vars: 
+    valid_ansible_run_tags: 
+      - oracle_facts
+      - prereqs
+      - primary_prepare
+      - standby_configure
+      - configure
+
+  vars_prompt:
+    - name: db_sys_password 
+      prompt: DB_SYS_PASSWORD
+      unsafe: true
+      private: true
+
+  collections:
+    - oracle.dbaas 
+
+  pre_tasks:
+
+    - name: Ansible run tags validation
+      ansible.builtin.assert:
+        quiet: true
+        that: item in (valid_ansible_run_tags)
+        fail_msg: Unrecognized Ansible tags {{ ansible_run_tags|join(',') }}. Valid Ansible tags are {{ valid_ansible_run_tags|join(',') }}.
+      with_items: "{{ ansible_run_tags|lower }}" 
+      run_once: true
+      delegate_to: localhost
+      tags: always
+      
+  roles:
+    - oracle_facts
+    - dataguard
+
+...

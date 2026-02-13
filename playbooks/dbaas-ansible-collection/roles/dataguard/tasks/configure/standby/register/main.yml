@@ -1,0 +1,30 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: dataguard register standby 
+  when:
+    - database_config.db_role == 'physical_standby'
+    - hostvars['localhost']['standby'] is defined
+    - ansible_hostname in database_config.master_node
+    - "'prereqs' not in ansible_run_tags"
+  block:
+
+  - name: DBaasCLI
+    ansible.builtin.include_tasks: dbaascli.yml
+    when: system_config.dbaascli_on
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

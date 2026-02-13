@@ -1,0 +1,25 @@
+---
+# License Information User Manual
+
+# Set the minimum version required 
+oracle_ansible_version: 2.18
+oracle_jinja2_version: 3.1
+oracle_jmespath_version: 1.0
+oracle_pexpect_versioin: 4.9
+oracle_xmltodict_version: 0.14
+oracle_python_version: 3.12
+oracle_grid_infrastructure: 19
+
+# Operating System Checklist for Oracle Grid Infrastructure and Oracle RAC
+# https://docs.oracle.com/en/database/oracle/oracle-database/19/cwlin/operating-system-checklist-for-oracle-grid-infrastructure-and-oracle-rac.html
+oracle_supported_distributions:
+  oraclelinux:
+    name: Oracle Linux
+    versions: [7, 8, 9]
+    architectures: [x86_64]
+  redhat:
+    name: Red Hat Enterprise Linux
+    versions: [7, 8, 9]
+    architectures: [x86_64]
+
+...

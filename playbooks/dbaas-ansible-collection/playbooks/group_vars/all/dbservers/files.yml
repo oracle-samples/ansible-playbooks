@@ -1,0 +1,5 @@
+dbservers_files:
+  - { name: "dbaascli" , path: "/usr/bin/dbaascli" }
+  - { name: "ahf" , path: "/etc/oracle.ahf.loc" }
+  - { name: "olr" , path: "/etc/oracle/olr.loc" }
+  - { name: "oraInst" , path: "/etc/oraInst.loc" }

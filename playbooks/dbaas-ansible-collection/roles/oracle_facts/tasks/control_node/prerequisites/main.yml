@@ -1,0 +1,20 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+# - name: Create the host_vars file
+#   delegate_to: localhost
+#   become: false
+#   ansible.builtin.file:
+#     path: "{{ playbook_dir }}/host_vars/{{ inventory_hostname }}" 
+#     state: touch 
+
+...

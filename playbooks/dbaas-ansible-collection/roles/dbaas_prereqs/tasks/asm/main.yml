@@ -1,0 +1,24 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaS PreReqs ASM 
+  block:
+
+  - name: ASM volume create 
+    import_tasks: asm_volume_create.yml 
+    when: 
+      - asm_volume_create | default(false)
+      - (ansible_mounts | selectattr ('mount', 'equalto', asm.volume.mountpath )) | length == 0
+      # - oracle_facts.system.crs_on
+      # - database_config.db_role is defined
+
+...

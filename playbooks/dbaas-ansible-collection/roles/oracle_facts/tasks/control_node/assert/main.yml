@@ -1,0 +1,84 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Validate Ansible Control Node
+  delegate_to: localhost
+  run_once: true
+  block:
+
+  - name: Verify you are using a supported Ansible version on your Ansible host
+    ansible.builtin.assert:
+      quiet: true
+      that:
+        - ansible_version['full'] is version(oracle_ansible_version, '>=')
+      # success_msg: Ansible {{ ansible_version['full'] }} is supported.
+      fail_msg: Ansible {{ ansible_version['full'] }} has reached End of Life (EoL). Please upgrade to a supported Ansible release. Check the README for more details.
+
+  - name: Extract the version of Jinja2 installed on your Ansible host
+    ansible.builtin.command: ansible --version
+    register: ansible_version_list
+    changed_when: false
+
+  - name: Verify that you are using a supported python version on your Ansible host
+    ansible.builtin.assert:
+      quiet: true
+      that: (ansible_version_list['stdout'] | regex_search('python version = ([\\d.]+)', '\\1') | first) is version(oracle_python_version, '>=')
+      # success_msg: Python {{ ansible_version_list['stdout'] | regex_search('python version = ([\d.]+)', '\1') | first }} is supported.
+      fail_msg: Python {{ ansible_version_list['stdout'] | regex_search('python version = ([\d.]+)', '\1') | first }} is not supported. Please upgrade to python {{ oracle_python_version }}. Check the README for more details.
+
+  - name: Verify that you are using a supported Jinja2 version on your Ansible host
+    ansible.builtin.assert:
+      quiet: true
+      that: (ansible_version_list['stdout'] | regex_search('jinja version = ([\\d.]+)', '\\1') | first) is version(oracle_jinja2_version, '>=')
+      # success_msg: Jinja2 {{ ansible_version_list['stdout'] | regex_search('jinja version = ([\d.]+)', '\1') | first }} is supported.
+      fail_msg: Jinja2 {{ ansible_version_list['stdout'] | regex_search('jinja version = ([\d.]+)', '\1') | first }} is not supported. Please upgrade to Jinja2 {{ oracle_jinja2_version }}. Check the README for more details.
+
+  - name: Extract the list of Ansible collections installed on your Ansible host
+    ansible.builtin.command: ansible-galaxy collection list
+    register: collection_list
+    changed_when: false
+
+  - name: Verify that the 'community.general' Ansible collection is installed on your Ansible host
+    ansible.builtin.assert:
+      quiet: true
+      that: collection_list is search('community.general')
+      # success_msg: The 'community.general' Ansible collection is installed.
+      fail_msg: The 'community.general' Ansible collection is not installed. Please install the 'community.general' Ansible collection. Check the README for more details.
+
+  - name: Verify that the 'ansible.posix' Ansible collection is installed on your Ansible host
+    ansible.builtin.assert:
+      quiet: true
+      that: lookup('community.general.collection_version', 'ansible.posix') != 'none'
+      # success_msg: The 'ansible.posix' Ansible collection is installed.
+      fail_msg: The 'ansible.posix' Ansible collection is not installed. Please install the 'ansible.posix' Ansible collection. Check the README for more details.
+    when: oracle_selinux | default(false) | bool
+
+  rescue:
+
+  - name: Assert failed assert control_node 
+    ansible.builtin.debug:
+      msg: "{{ item.assertion }}"
+    with_items:
+      - "{{ ansible_version_list['results'] }}"
+      - "{{ collection_list['results'] }}"
+    when:
+      - oracle_meta_assert_control_node | default(true)
+      - item.failed is defined
+      - item.failed | bool
+
+  - name: Fail execution of oracle_meta
+    ansible.builtin.fail:
+      msg: >-
+        See previous debug task for assertation failure
+        Set oracle_meta_assert_control_node=false in inventory/group_vars/all to disable this fail task.
+    when:
+      - oracle_meta_assert_control_node | default(true)

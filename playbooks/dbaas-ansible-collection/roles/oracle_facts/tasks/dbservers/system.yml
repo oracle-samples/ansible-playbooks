@@ -1,0 +1,98 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Set fact run_system_facts
+  set_fact:
+    run_system_facts: true|bool
+  when: 
+    - ((oracle_facts.system.timestamp is not defined) or
+      ( (ansible_date_time.epoch|int - oracle_facts.system.timestamp|int) > force_facts_timestamp|int ) or
+      ('force_facts' in ansible_run_tags) or
+      (force_facts | default(false)))
+
+- name: oracle_facts dbservers system
+  when: 
+    - oracle_facts.server.dbservers
+    - run_system_facts | default(false)
+  block:
+
+  - name: Find oracle files
+    stat:
+      path: "{{ item }}" 
+    with_items: "{{ dbservers_files | map(attribute='path') }}"
+    register: oracle_files_stat 
+
+  - name: Reading oracle files
+    slurp:
+      src: "{{ item.stat.path }}"
+    with_items: "{{ oracle_files_stat.results }}"
+    when: 
+      - item.stat.exists | default(false)
+      - item.stat.readable
+    register: oracle_files_stat_slurp
+
+  - name: Generate oracle_files_stat_slurp
+    set_fact:
+      oracle_files_fact: |
+        {%- for item in oracle_files_stat_slurp.results -%}
+          {% if (item.item.stat.exists and not item.item.stat.executable) | default(false) %}{{ item.content | b64decode }}{% endif %}
+        {% endfor %}
+    when: oracle_files_stat_slurp.results is defined
+
+  - name: Gather facts on listening ports
+    become: true
+    community.general.listen_ports_facts:
+
+  - name: Set system facts
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+    vars:
+      _system:
+        - key: system
+          value:
+            inventory_loc: "{{ oracle_files_fact | regex_findall('inventory_loc=(.*)') | first }}"
+            inst_group: "{{ oracle_files_fact | regex_findall('inst_group=(.*)') | first }}"
+            oracle_ahf_loc: "{{ oracle_files_fact | regex_search('(.+)ahf') }}" 
+            crs_on: "{{ oracle_files_stat.results | selectattr ('item', 'equalto', '/etc/oracle/olr.loc') | map(attribute='stat') | map(attribute='exists') | first }}"
+            grid_home: "{{ (oracle_files_stat.results | selectattr ('item', 'equalto', '/etc/oracle/olr.loc') | map(attribute='stat') | map(attribute='exists') | first) | ternary(( oracle_files_fact | regex_findall('crs_home=(.*)') | first), false | bool) }}"
+            dbaascli_on: "{{ oracle_files_stat.results | selectattr ('item', 'equalto', '/usr/bin/dbaascli') | map(attribute='stat') | map(attribute='exists') | first }}"
+            tnslsnr_port: "{{ ansible_facts.tcp_listen | selectattr ('name', 'equalto', 'tnslsnr' ) | selectattr ('address', 'equalto', ansible_default_ipv4['address'] ) | map(attribute='port') | min | default(ansible_facts.tcp_listen | selectattr ('name', 'equalto', 'tnslsnr' ) | selectattr ('address', 'equalto', '0.0.0.0' ) | map(attribute='port') | min) }}"
+            ons_port: "{{ ansible_facts.tcp_listen | selectattr ('name', 'equalto', 'ons' ) | map(attribute='port') | join(',') | default(false|bool) }}"
+            timestamp: "{{ ansible_date_time.epoch | int }}"
+
+  - name: Create inventory_hostname directory 
+    delegate_to: localhost
+    file:
+      path: "{{ inventory_dir }}/host_vars/{{ inventory_hostname }}" 
+      state: directory
+      
+  - name: Record system facts 
+    delegate_to: localhost
+    ansible.builtin.copy:
+      content: "{ oracle_facts: {system: {{ oracle_facts.system }} } }"
+      dest: "{{ inventory_dir }}/host_vars/{{ inventory_hostname }}/system.yml" 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Oracle oracle_facts.system
+        -----------------
+        "{{ oracle_facts | community.general.json_query('system') }}"
+        ==================================================
+    when: oracle_facts is defined
+    tags: [print_action]
+    ignore_errors: true
+
+...

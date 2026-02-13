@@ -1,0 +1,59 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI database move
+  become: True
+  ignore_errors: True
+  when: 
+    - oracleHomeName is defined
+    - database_config.db_role is defined
+    - ansible_hostname in database_config.master_node
+  block:
+
+  - name: Run DBaaSCLI pdb move primary
+    command: >
+      dbaascli pdb relocate
+      --db_name {{ db_name }}
+      --pdb_name {{ pdb_name }}
+      --sourceDBConnectionString {{ sourceDBConnectionString }}
+      --relocateAvailabilityType MAX 
+      --dbca_additional_args "-skipDatapatch"
+    register: dbaascli_pdb_move_primary
+    when:
+      - database_config.db_role == 'primary'
+    failed_when: "'dbaascli execution completed' not in dbaascli_pdb_move_primary.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Run DBaaSCLI pdb move primary
+        -----------------
+        {{ dbaascli_pdb_move_primary.stdout_lines | to_nice_yaml }}
+        ==================================================
+    # when: dbaascli_pdb_move_primary is failed
+
+  # - set_fact:
+  #     dbaastools_log: "{{ dbaascli_database_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"
+  #   when: 
+  #     - "'dbaascli execution completed' in dbaascli_database_move_primary.stdout"
+
+  - name: Analyze DBaaSCLI log
+    include_tasks: log_analyze.yml
+    vars:
+      dbaastools_log: "{{ dbaascli_pdb_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"  
+    when: 
+      - dbaascli_pdb_move_primary is success
+      - "'dbaascli execution completed' in dbaascli_pdb_move_primary.stdout"
+
+

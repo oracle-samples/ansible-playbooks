@@ -1,0 +1,194 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI PDB move
+  become: false
+  ignore_errors: true
+  when: 
+    - database_config.db_name == target_db_name
+    - database_config.db_role is defined
+    - database_config.db_role == "primary"
+    - ansible_hostname in database_config.master_node
+  block:
+
+  - name: Write timeline into csv file
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.control.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ ansible_hostname }},{{ task_name }},{{ status }}"
+    delegate_to: "{{ swingbench_server }}"
+    when: "'framework' in ansible_run_tags"
+    vars:
+      task_name: "DBaaSCLI_pdb_move_prereqs"
+      status: "running"
+
+  - name: Run DBaaSCLI pdb move prereqs
+    become: True
+    vars:
+      sourceDBConnectionString_query: "{{ target_db_name }}.sourceDBConnectionString"
+    expect:
+      command: >
+        dbaascli pdb relocate
+        --pdb_name {{ pdb_name }}
+        --db_name {{ db_name }}
+        --sourceDBConnectionString {{ pdbm | json_query(sourceDBConnectionString_query) }}
+        --relocateAvailabilityType MAX 
+        --dbca_additional_args "-skipDatapatch"
+        --prereqs
+      responses:
+        Enter REMOTE_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter REMOTE_DB_SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: dbaascli_pdb_move_prereqs
+    failed_when: "'dbaascli execution completed' not in dbaascli_pdb_move_prereqs.stdout"
+
+  - name: Run DBaaSCLI pdb delete
+    become: True
+    command: >
+      dbaascli pdb delete 
+      --db_name {{ db_name }} 
+      --pdb_name {{ pdb_name }} 
+    register: dbaascli_pdb_delete
+    when:
+      - dbaascli_pdb_move_prereqs is failed
+      - "'DBT-19409' in dbaascli_pdb_move_prereqs.stdout"
+      # [FATAL] [DBT-19409] There is an already existing PDB (PDB001) with the same GUID of the specified remote PDB.
+    failed_when: 
+      - "'dbaascli execution completed' not in dbaascli_pdb_delete.stdout"
+
+  - name: Run DBaaSCLI pdb move executeFixups
+    become: True
+    vars:
+      sourceDBConnectionString_query: "{{ target_db_name }}.sourceDBConnectionString"
+    expect:
+      command: >
+        dbaascli pdb relocate
+        --pdb_name {{ pdb_name }}
+        --db_name {{ db_name }}
+        --sourceDBConnectionString {{ pdbm | json_query(sourceDBConnectionString_query) }}
+        --relocateAvailabilityType MAX 
+        --dbca_additional_args "-skipDatapatch"
+        --prereqs
+      responses:
+        Enter REMOTE_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter REMOTE_DB_SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: dbaascli_pdb_move_executeFixups
+    when:
+      - dbaascli_pdb_move_prereqs is failed
+    failed_when: "'dbaascli execution completed' not in dbaascli_pdb_move_executeFixups.stdout"
+
+  - name: Write timeline into csv file
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.control.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ ansible_hostname }},{{ task_name }},{{ status }}"
+    delegate_to: "{{ swingbench_server }}"
+    when: "'framework' in ansible_run_tags"
+    vars:
+      task_name: "DBaaSCLI_pdb_move_prereqs"
+      status: "finished"
+
+  - name: Write timeline into csv file
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.control.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ ansible_hostname }},{{ task_name }},{{ status }}"
+    delegate_to: "{{ swingbench_server }}"
+    when: "'framework' in ansible_run_tags"
+    vars:
+      task_name: "DBaaSCLI_pdb_move"
+      status: "running"
+
+  - name: OCI DNS record domain update
+    command: >-
+      oci dns record domain update 
+      --compartment-id {{ pdbm.compartment_id }} 
+      --zone-name-or-id {{ pdbm.zone_name_or_id }} 
+      --domain {{ pdbm.domain}} 
+      --from-json "file://{{ pdbm.from_json.start }}" 
+      --force 
+    when: ((dbaascli_pdb_move_executeFixups is success) or (dbaascli_pdb_move_executeFixups is skipped))
+    register: dns_record_domain_update_star
+
+  - name: Run DBaaSCLI pdb move primary
+    become: True
+    vars:
+      sourceDBConnectionString_query: "{{ target_db_name }}.sourceDBConnectionString"
+    expect:
+      command: >
+        dbaascli pdb relocate
+        --pdb_name {{ pdb_name }}
+        --db_name {{ db_name }}
+        --sourceDBConnectionString {{ pdbm | json_query(sourceDBConnectionString_query) }}
+        --relocateAvailabilityType MAX 
+        --dbca_additional_args "-skipDatapatch"
+      responses:
+        Enter REMOTE_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter REMOTE_DB_SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600 
+    when: 
+      - ((dbaascli_pdb_move_executeFixups is success) or (dbaascli_pdb_move_executeFixups is skipped))
+      - dns_record_domain_update_star is success 
+    register: dbaascli_pdb_move_primary
+    failed_when: "'dbaascli execution completed' not in dbaascli_pdb_move_primary.stdout"
+
+  - name: OCI DNS record domain update
+    command: >
+      oci dns record domain update 
+      --compartment-id {{ pdbm.compartment_id }} 
+      --zone-name-or-id {{ pdbm.zone_name_or_id }} 
+      --domain {{ pdbm.domain}} 
+      --from-json "file://{{ pdbm.from_json.final }}" 
+      --force 
+    when: dns_record_domain_update_star is success
+    register: dns_record_domain_update_final
+
+  - name: Write timeline into csv file
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.control.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ ansible_hostname }},{{ task_name }},{{ status }}"
+    delegate_to: "{{ swingbench_server }}"
+    when: "'framework' in ansible_run_tags"
+    vars:
+      task_name: "DBaaSCLI_pdb_move"
+      status: "finished"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Run DBaaSCLI pdb move primary
+        -----------------
+        {{ dbaascli_pdb_move_primary.stdout_lines | to_nice_yaml }}
+        ==================================================
+
+  - name: Add DBaaSCLI pdb move primary to story
+    set_fact:
+     story: "{{ story | default([]) + [dbaascli_pdb_move_primary.stdout_lines | to_nice_yaml] }}"
+
+  # - set_fact:
+  #     dbaastools_log: "{{ dbaascli_database_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"
+  #   when: 
+  #     - "'dbaascli execution completed' in dbaascli_database_move_primary.stdout"
+
+  - name: Analyze DBaaSCLI log
+    include_tasks: log_analyze.yml
+    vars:
+      dbaastools_log: "{{ dbaascli_pdb_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"  
+    when: 
+      - dbaascli_pdb_move_primary is success
+      - "'dbaascli execution completed' in dbaascli_pdb_move_primary.stdout"
+
+

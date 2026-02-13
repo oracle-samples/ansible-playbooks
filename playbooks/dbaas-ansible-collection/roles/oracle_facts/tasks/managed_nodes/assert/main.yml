@@ -1,0 +1,75 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Assert oracle_meta_assert_hosts
+  when:
+    - oracle_meta_assert_hosts | default(true)
+  tags:
+    - always
+    - oracle_assert 
+  block:
+
+  - name: Save missing_list fact under Ansible controller
+    ansible.builtin.set_fact:
+      missing_list: "{{ hostvars | dict2items | json_query(missing_query) }}"
+    vars:
+      missing_query: "[?value.missing==`true`].key"
+    delegate_to: localhost
+    delegate_facts: true
+    run_once: true
+
+  # - name: assert server 
+  #   ansible.builtin.assert:
+  #     quiet: true
+  #     that:
+  #       - orafac.job_success | bool 
+  #       - not orafac.missing | bool 
+  #   with_items:
+  #     - "{{ ansible_facts.oracle_facts.server }}"
+  #   loop_control:
+  #     label: "{{ orafac.server | default('') }}"
+  #     loop_var: orafac 
+
+  - name: Assert server missing 
+    ansible.builtin.assert:
+      quiet: true
+      that:
+        - hostvars['localhost']['missing_list'] | length == 0
+      fail_msg: "missing_list: {{ hostvars['localhost']['missing_list'] }}"
+
+    when:
+      - oracle_meta_assert_server | default(true) | bool
+
+  - name: Verify whether you are using a supported Linux distribution
+    ansible.builtin.assert:
+      quiet: true
+      that:
+        - ansible_facts['distribution'] | lower in oracle_supported_distributions.keys() | list
+        - ansible_facts['distribution_major_version'] in oracle_supported_distributions[ansible_facts['distribution'] | lower]['versions'] | string
+        - ansible_facts['architecture'] in oracle_supported_distributions[ansible_facts['distribution'] | lower]['architectures']
+      # success_msg: Your distribution, {{ oracle_supported_distributions[ansible_facts['distribution'] | lower]['name'] }} {{ ansible_facts['distribution_version'] }} ({{ ansible_facts['architecture'] }}), is supported by this Ansible playbook.
+      fail_msg:
+        - Your distribution, {{ oracle_supported_distributions[ansible_facts['distribution'] | lower]['name'] }} {{ ansible_facts['distribution_version'] }} ({{ ansible_facts['architecture'] }}), is not supported by this Ansible playbook.
+        - Please upgrade to Linux distribution to {{ oracle_supported_distributions | trim }}
+        - Check the README for more details.
+
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of oracle_meta_assert_hosts
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_meta_assert_hosts=False in inventory/group_vars/all to disable this fail task.
+      when:
+        - oracle_meta_assert_hosts | default(true) | bool
+
+...

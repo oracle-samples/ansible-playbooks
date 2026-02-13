@@ -1,0 +1,58 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaS PreReqs Database 
+  when: database_config.db_role is defined
+  block:
+
+  # - name: Database enable flashback 
+  #   import_tasks: sqlplus_execute.yml
+  #   vars:
+  #     sql_command: "{{ flashback_on }}"
+  #   when: 
+  #     - db_flashback | default(false)
+  #     - database_config.db_role == 'primary'
+  #     - not database_config.flashback_on
+
+  # - name: Database force logging
+  #   import_tasks: sqlplus_execute.yml
+  #   vars:
+  #     sql_command: "{{ force_logging }}"
+  #   when: 
+  #     - force_logging | default(false)
+  #     - database_config.db_role == 'primary'
+  #     - not database_config.flashback_on
+
+  - name: Database enable flashback
+    sqlplus:
+      query: "{{ sql_flashback_on }}" 
+    environment: "{{ oracle_env }}"
+    when: 
+      - db_flashback | default(false)
+      - database_config.db_role == 'primary'
+      - not database_config.flashback_on
+
+  - name: Database force logging
+    sqlplus:
+      query: "{{ sql_force_logging }}" 
+    environment: "{{ oracle_env }}"
+    when: 
+      - force_logging | default(false)
+      - database_config.db_role == 'primary'
+      - not database_config.force_logging_on
+
+  - name: Database config TNS_ADMIN 
+    import_tasks: tns_admin_config.yml
+    when: 
+      - tns_admin_config | default(false)
+
+...

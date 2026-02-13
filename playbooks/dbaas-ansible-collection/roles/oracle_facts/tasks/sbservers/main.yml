@@ -1,0 +1,78 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Gather sbservers facts 
+  become: true
+  block:
+
+    - name: Install lxml 
+      become: true
+      pip: 
+        name: lxml 
+        
+    - name: Find Swingbench home
+      find:
+        paths: "{{ ansible_base_managed }}" 
+        file_type: file 
+        patterns: "sbutil" 
+        age_stamp: mtime
+        recurse: true
+      register: _swingbench_home
+
+    - name: Find JDK Development Kit home
+      find:
+        paths: "{{ ansible_base_managed }}" 
+        file_type: directory 
+        patterns: "jdk-*" 
+        age_stamp: mtime
+      register: _jdk_home
+
+    - name: Write sbservers facts
+      ansible.builtin.set_fact:
+        jdk_home: "{{ (_jdk_home.files|sort(attribute='mtime', reverse=true)|first).path }}"
+        swingbench_home: "{{ (_swingbench_home.files|sort(attribute='mtime', reverse=true)|first).path | dirname | dirname  }}"
+        swingbench_version: "{{ (_swingbench_home.files|sort(attribute='mtime', reverse=true)|first).path | dirname | dirname | basename  }}"
+      when: 
+        - _swingbench_home.matched > 0
+        - _jdk_home.matched > 0
+    
+    # - name: Find oraInst.loc file 
+    #   stat:
+    #     path: /etc/oraInst.loc
+    #   register: _oraInst_found
+
+    # - name: Reading oraInst.loc file
+    #   slurp:
+    #     src: /etc/oraInst.loc
+    #   register: _inventory_loc 
+    #   when: _oraInst_found.stat.exists
+
+    # - name: Set inventory_loc fact 
+    #   set_fact:
+    #     inventory_loc: "{{ _inventory_loc['content'] | b64decode | regex_search('inventory_loc=(.+)', '\\1') | first }}"
+    #   when: _oraInst_found.stat.exists
+
+    # - name: Read inventory_loc
+    #   community.general.xml:
+    #     path: "{{ inventory_loc }}/ContentsXML/inventory.xml"
+    #     xpath: /INVENTORY/HOME_LIST/HOME
+    #     content: attribute
+    #   register: _inventory_xml
+
+    # - name: Find installed Oracle Homes 
+    #   set_fact:
+    #     oracle_home: "{{ ___LOC | sort(reverse=true) | first }}"
+    #   vars:
+    #     __xml_command_results: "{{ _inventory_xml.matches | map(attribute='HOME') }}"
+    #     ___LOC: "{{ __xml_command_results | map(attribute='LOC') }}"
+
+...

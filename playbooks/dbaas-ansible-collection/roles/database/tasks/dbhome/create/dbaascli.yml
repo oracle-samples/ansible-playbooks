@@ -1,0 +1,152 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Standby Block 
+  block:
+
+  - name: Set remaining hosts as not missing
+    ansible.builtin.set_fact:
+      dbtarget_success: true
+
+  - name: Save job_report facts under Ansible controller
+    delegate_to: localhost
+    delegate_facts: true
+    set_fact:
+      dbtarget_list: '{{ hostvars | dict2items | json_query(dbtarget_query) }}'
+    vars:
+      dbtarget_query: "[?value.dbtarget_success==`true`].key"
+
+  - name: Set target fact
+    ansible.builtin.set_fact:
+      targetHome: true
+      hostname_target: "{{ hostvars['localhost']['dbtarget_list'] | sort | first }}"
+      
+- name: DBaaSCLI dbHome get version Block
+  block:
+
+  - name: Verify you are using a supported Oracle Grid Infrastructure
+    ansible.builtin.assert:
+      that:
+        - oracle_facts.grid['activeVersion'] is version(version|split('.')|first, '>=')
+      success_msg: Oracle Grid Infrastructure {{ oracle_facts.grid['activeVersion'] }} supports database version {{ version }}.
+      fail_msg: Oracle Grid Infrastructure {{ oracle_facts.grid['activeVersion'] }} does not support database version {{ version }}.
+      
+  - name: DBaasCLI system getDBHomes
+    become: true
+    shell: >
+      dbaascli system getDBHomes
+      --showOutputDelimiter 
+      | sed -n '/Start of output/, /End of output/{ /Start of output/! { /End of output/! p }}'
+    register: _dbaascli_system_getDBHomes
+
+  - name: Write fact _OracleHome_facts from _dbaascli_database_getDetails
+    ansible.builtin.set_fact:
+      cacheable: false
+      _OracleHome_facts: "{{ _OracleHome_facts | default({}) | combine(_dbhome | items2dict) }}"
+    vars:
+      _dbhome:
+        - key: dbhome 
+          value: "{{ _dbaascli_system_getDBHomes.stdout | from_json | community.general.json_query('*') }}"
+    when: 
+      - _dbaascli_system_getDBHomes is defined
+      - _dbaascli_system_getDBHomes.stdout | length > 0
+
+  - name: Write fact _dbHomeTarget
+    ansible.builtin.set_fact:
+      _oracleHomeVersion: "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomeVersion_query) | sort | last | default('not_found') }}"
+      _oracleHomeName:    "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomeName_query)    | sort | last | default('not_found') }}"
+      _oracleHomePath:    "{{ _OracleHome_facts | to_json | from_json | community.general.json_query(oracleHomePath_query)    | sort | last | default('not_found') }}"
+    vars:
+      oracleHomeVersion_query:  "dbhome[?starts_with(version,'{{ version }}')].version"
+      oracleHomeName_query:     "dbhome[?starts_with(version,'{{ version }}')].homeName"
+      oracleHomePath_query: "dbhome[?starts_with(version,'{{ version }}')].homePath"
+    when: _OracleHome_facts is defined
+
+  - name: Write fact oracleHomeName
+    ansible.builtin.set_fact:
+      oracleHomeName: "{{ _oracleHomeName }}"
+    when:
+      - _oracleHomeName is defined
+      - _oracleHomeName != 'no_oracle_home_found'
+
+- name: DBaaSCLI cswlib showImages Block
+  when: 
+    - ((database_config.db_role is defined) or (targetHome is true))
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+    - version is defined
+    - ((oracleHomeName is not defined) or (oracleHomeName=='not_found'))
+  block:
+
+  - name: DBaaSCLI cswlib showImages
+    become: true
+    shell: >
+      dbaascli cswlib showImages 
+      | grep VERSION= | cut -d'=' -f2 | sort -u
+    # shell: "dbaascli cswlib showImages | grep VERSION= | cut -d'=' -f2 | sort -u | grep ^{{ version }}"
+    register: _dbaascli_cswlib_showImages
+
+  - name: Write fact _oracleHomeVersion from _dbaascli_cswlib_showImages
+    ansible.builtin.set_fact:
+      _oracleHomeVersion: "{{ _dbaascli_cswlib_showImages.stdout_lines | select('search',version) | last }}"
+    when: _dbaascli_cswlib_showImages.stdout_lines | length > 0
+
+- name: DBaaSCLI dbHome create Block
+  become: true
+  when: 
+    - ((database_config.db_role is defined) or (targetHome is true))
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+    - ((oracleHomeName is not defined) or (oracleHomeName=='not_found'))
+    - _oracleHomeVersion is defined 
+  block:
+
+  - name: DBaaSCLI cswlib download
+    command: >
+      dbaascli cswlib download 
+      --version {{ _oracleHomeVersion }}
+    register: _dbaascli_cswlib_download
+    failed_when: "'dbaascli execution completed' not in _dbaascli_cswlib_download.stdout"
+
+  - name: DBaaSCLI dbHome create
+    shell: >
+      dbaascli dbHome create 
+      --version {{ _oracleHomeVersion }} 
+    register: _dbaascli_dbHome_create
+    when: _dbaascli_cswlib_download.changed|bool
+    failed_when: "'ORACLE_HOME_NAME' not in _dbaascli_dbHome_create.stdout"
+
+  - name: Write fact _DBHomeTarget from _dbaascli_dbHome_create 
+    ansible.builtin.set_fact:
+      oracleHomeName: "{{ _dbaascli_dbHome_create.stdout_lines | select('search','ORACLE_HOME_NAME') | last | from_json | community.general.json_query('ORACLE_HOME_NAME') }}"
+      oracleHomeVersion: "{{ _oracleHomeVersion }}"
+      oracleHomePath: "{{ _dbaascli_dbHome_create.stdout_lines | select('search','ORACLE_HOME') | last | from_json | community.general.json_query('ORACLE_HOME') }}"
+    when: _dbaascli_dbHome_create.changed|bool
+    ignore_errors: true
+
+- debug:
+    msg: "{{ output | split('\n') }}" 
+  vars:
+    output: | 
+      ==================================================
+      DBaasCLI dbHome getDetails
+      -----------------
+        oracleHomeName:     {{ oracleHomeName }}
+        oracleHomeVersion:  {{ oracleHomeVersion | default(_oracleHomeVersion) }}
+        oracleHomePath:     {{ oracleHomePath | default(_oracleHomePath) }}
+      ==================================================
+  when:
+    - ((database_config.db_role is defined) or (targetHome is true))
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+    - oracleHomeName is defined
+  tags: [print_action]

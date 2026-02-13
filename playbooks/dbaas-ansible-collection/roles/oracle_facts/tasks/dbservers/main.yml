@@ -1,0 +1,34 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: dbserver 
+  block:
+
+  - name: system 
+    ansible.builtin.include_tasks: system.yml
+
+  - name: Gather grid facts 
+    ansible.builtin.include_tasks: grid.yml
+
+  # - name: Assert dbserver_grid
+  #   ansible.builtin.include_tasks: dbservers/assert/grid.yml
+
+  - name: Gather database facts 
+    ansible.builtin.include_tasks: database/main.yml  
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name
+    when:
+      - oracle_facts.server.dbservers
+      - db_name_list is defined 
+
+...

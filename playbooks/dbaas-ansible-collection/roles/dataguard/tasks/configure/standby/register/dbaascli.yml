@@ -1,0 +1,43 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCLI registerStandby Block
+  become: true
+  block:
+
+  - name: Run DBaasCLI dataguard registerStandby 
+    command: >
+      dbaascli dataguard registerStandby 
+      --db_name {{ db_name }}
+      --standbyDBUniqueName {{ hostvars['localhost']['standby']['db_unique_name'] }}
+      --standbyScanIPAddresses {{ hostvars['localhost']['standby']['scan_ip_addresses'] }}
+      --standbyScanPort {{ hostvars['localhost']['standby']['scan_port'] }}
+      --standbyServiceName {{ hostvars['localhost']['standby']['db_unique_name'] }}.{{ hostvars['localhost']['primary']['db_domain'] }}
+      --standbyDBDomain {{ hostvars['localhost']['standby']['db_domain'] }}
+    register: registerStandby
+    failed_when: "'dbaascli execution completed' not in registerStandby.stdout"
+    ignore_errors: true
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI registerStandby
+        -----------------
+        {{ registerStandby.cmd }}
+        -----------------
+        {{ registerStandby.stdout }} 
+        ==================================================
+    when: registerStandby is not skipped
+
+...

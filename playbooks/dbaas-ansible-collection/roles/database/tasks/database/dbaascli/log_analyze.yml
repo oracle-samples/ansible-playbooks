@@ -1,0 +1,50 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI log analyze
+  become: true
+  ignore_errors: true 
+  block:
+
+  - name: Get pilot log from _dbaastools_log
+    command: "awk '/Log file location: / {print $NF}' {{ dbaastools_log }}"
+    register: _dbaastools_log_output
+
+  - set_fact:
+      pilot_log: "{{ _dbaastools_log_output.stdout_lines[0] }}"
+
+  - name: DBaaSCLI step-by-step time
+    shell: >
+      egrep -B1 'START OF JOB INIT|END OF JOB' {{ pilot_log }} |
+      egrep -E '[[:digit:]]{4}\-[[:digit:]]{2}\-[[:digit:]]{2}|OF JOB'|
+      paste -s -d' \n'|
+      awk -F"[][ ]" -v OFS=',' '{currdate=$3" "$4; if (NR==1) prevdate=currdate; datecmd="date --date \""currdate"\" +%s"; datecmd | 
+      getline currdates; close(datecmd); datecmd="date --date \""prevdate"\" +%s"; datecmd | 
+      getline prevdates; close(datecmd);durations=currdates-prevdates; datecmd="date -d@\""durations"\" -u +%H:%M:%S"; datecmd | 
+      getline duration; close(datecmd);print duration, currdate, $13, $16; prevdate=currdate}'
+    register: dbaascli_step_by_step_timing 
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI step-by-step time
+        -----------------
+        {{ dbaascli_step_by_step_timing.stdout_lines | to_nice_yaml }}
+        ==================================================
+
+  - name: Add dbaascli_command_output to story
+    set_fact:
+     story: "{{ story | default([]) + [dbaascli_step_by_step_timing.stdout_lines | to_nice_yaml] }}"
+    when: dbaascli_step_by_step_timing is success 
+...

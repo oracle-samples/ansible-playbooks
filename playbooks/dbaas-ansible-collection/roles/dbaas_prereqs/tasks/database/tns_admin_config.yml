@@ -1,0 +1,73 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Configure TNS admin 
+  become: true
+  become_user: "{{ oracle_user }}" 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment: "{{ oracle_env }}"
+  block:
+
+  - name: Find TNS_ADMIN/tnsnames.ora file  
+    ansible.builtin.stat:
+      path: "{{ database_config.homePath }}/network/admin/{{ database_config.db_name }}/tnsnames.ora"
+    register: _tns_admin_tnsnames
+
+  - name: Create TNS_ADMIN directory 
+    file:
+      path: "{{ database_config.homePath }}/network/admin/{{ database_config.db_name }}"
+      state: directory
+      mode: '0755'
+      owner: "{{ oracle_user }}" 
+      group: oinstall
+    when: not _tns_admin_tnsnames.stat.exists
+
+  - name: Touch tnsnames.ora
+    ansible.builtin.file:
+      path: "{{ database_config.homePath }}/network/admin/tnsnames.ora"
+      state: touch
+    when: not _tns_admin_tnsnames.stat.exists
+
+  - name: Copy tnsnames.ora to TNS_ADMIN directory 
+    copy: 
+      src: "{{ database_config.homePath }}/network/admin/tnsnames.ora"
+      dest: "{{ database_config.homePath }}/network/admin/{{ database_config.db_name }}"
+      owner: "{{ oracle_user }}" 
+      group: oinstall 
+      mode: u=rw,g=r,o= 
+      remote_src: true
+    when: not _tns_admin_tnsnames.stat.exists
+
+  - name: Setenv TNS_ADMIN 
+    command: >
+      {{ database_config.homePath }}/bin/srvctl setenv database 
+      -db {{ database_config.dbUniqueName }} 
+      -env TNS_ADMIN={{ database_config.homePath }}/network/admin/{{ database_config.db_name }}
+    when: not _tns_admin_tnsnames.stat.exists
+
+  - name: Database stop
+    shell: |
+      {{ database_config.homePath }}/bin/srvctl stop database -db  {{ database_config.dbUniqueName }} -o immediate
+    when:
+      - not _tns_admin_tnsnames.stat.exists 
+      - ansible_hostname in database_config.master_node
+
+  - name: Database start 
+    shell: |
+      {{ database_config.homePath }}/bin/srvctl start database -db  {{ database_config.dbUniqueName }} 
+    when: 
+      - not _tns_admin_tnsnames.stat.exists
+      - ansible_hostname in database_config.master_node
+
+...

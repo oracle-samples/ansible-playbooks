@@ -1,0 +1,97 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Gather Oracle Grid Facts as grid user 
+  become: true
+  become_user: "{{ grid_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_facts.system.grid_home }}" 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  when: oracle_facts.system.crs_on
+  block:
+
+  - name: Get grid olsnodes
+    shell: "{{ oracle_facts.system.grid_home }}/bin/olsnodes -s |grep Active | awk '{print $1}'"
+    register: _grid_olsnodes
+
+  - name: Get orabase
+    shell: "{{ oracle_facts.system.grid_home }}/bin/orabase"
+    when: oracle_facts.grid.orabase is not defined
+    register: _orabase 
+
+  - name: Get GI full version 
+    shell: "{{ oracle_facts.system.grid_home }}/bin/oraversion -compositeVersion" 
+    register: _database_version
+
+  - name: Get CRS upgrade state
+    shell: "{{ oracle_facts.system.grid_home }}/bin/crsctl query crs activeversion -f"
+    register: _upgrade_state
+
+  - name: Get scan configuration
+    shell: "{{ oracle_facts.system.grid_home }}/bin/srvctl config scan"
+    register: _srvctl_config_scan 
+
+  - name: Set grid facts
+    ansible.builtin.set_fact:
+      cacheable: false
+      oracle_facts: "{{ oracle_facts | default({}) | combine(_grid | items2dict) }}"
+    when: oracle_facts.grid is not defined
+    vars:
+      _grid:
+        - key: grid 
+          value:
+            oracle_base: "{{ oracle_facts.grid.orabase | default(_orabase.stdout) }}"
+            state: "{{ (_upgrade_state.stdout | regex_findall('The cluster upgrade state is (.+). The cluster active patch level is') | first)[1:-1] }}"
+            cluster_nodes: "{{ _grid_olsnodes.stdout_lines | join(',') }}"
+            master_node: "{{ _grid_olsnodes.stdout_lines | intersect(ansible_play_hosts | map('extract', hostvars, 'ansible_hostname') ) | sort | first }}"
+            oracle_home: "{{ oracle_facts.system.grid_home }}"
+            patchVersion: "{{ _database_version.stdout }}"
+            activeVersion: "{{ (_upgrade_state.stdout | regex_findall('Oracle Clusterware active version on the cluster is (.+). The cluster upgrade state is') | first)[1:-1] }}"
+            scan_name: "{{ _srvctl_config_scan.stdout | regex_search('SCAN name: (.+),' , '\\1') | first }}"
+            scan_ips:  "{{ _srvctl_config_scan.stdout | regex_findall('IPv4 VIP: (.+)') | join(',') }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Oracle oracle_facts.grid
+        -----------------
+        "{{ oracle_facts | community.general.json_query('grid') }}"
+        ==================================================
+    when: oracle_facts is defined
+    tags: [print_action]
+    ignore_errors: true
+    
+  rescue:
+
+    # default is => Fail execution of Playbook
+    - name: Fail execution of system
+      ansible.builtin.fail:
+        msg: >-
+          Set oracle_fact_system_ignore_failed=true in inventory/group_vars/dbservers to disable this fail task.
+      when:
+        - not oracle_fact_system_ignore_failed | default(false)
+
+    - name: Write empty facts to system(rescue from failure above)
+      ansible.builtin.set_fact:
+        cacheable: false
+        oracle_facts: "{{ oracle_facts | default({}) | combine(_system | items2dict) }}"
+      vars:
+        _system:
+          - key: system 
+            value:
+              state: failed 
+
+...

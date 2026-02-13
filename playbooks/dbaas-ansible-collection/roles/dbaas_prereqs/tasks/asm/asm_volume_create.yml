@@ -1,0 +1,136 @@
+---
+#
+# Oracle GoldenGate MAA Deployment
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: ASM Volumen Create
+  become: true
+  become_user: "{{ grid_config.user }}" 
+  environment: "{{ grid_env }}"
+  block:
+
+  - name: ASM volcreate 
+    shell: >
+      {{ grid_config.homePath }}/bin/asmcmd
+      volcreate
+      -G {{ asm.diskgroup.data }}
+      -s {{ asm.volume.size }}
+      {{ asm.volume.name | upper }}
+    when:
+      - grid_config.master_node in ansible_hostname
+    register: _asm_volcreate
+    failed_when:
+      - _asm_volcreate.rc != 0
+      - "'ORA-15460' not in _asm_volcreate.stderr"
+      # ORA-15460: volume name 'VOL_HUB1' is already in use (DBD ERROR: OCIStmtExecute)
+
+  - name: ASM volinfo 
+    shell: >
+      {{ grid_config.homePath }}/bin/asmcmd
+      volinfo
+      -G {{ asm.diskgroup.data }}
+      {{ asm.volume.name }}
+    register: _asm_vol_info
+          
+  - name: mkfs acfs asm_vol_dev
+    become_user: root
+    shell: >
+      /sbin/mkfs
+      -t acfs {{ _asm_vol_info.stdout | regex_search('Volume Device: .*') | split(': ') | last }}
+    when: 
+     - grid_config.master_node in ansible_hostname
+     - _asm_volcreate.changed
+    register: _acfs_mkfs
+    failed_when:
+      - _acfs_mkfs.rc != 0
+      - "'ACFS-01010' not in _acfs_mkfs.stderr"
+      # ACFS-01010: Volume already contains an ACFS file system.
+
+  - name: Create asm.volume.mountpath mount directory
+    become_user: root
+    file:
+      path: "{{ asm.volume.mountpath }}"
+      state: directory
+      mode: '0775'
+      owner: oracle 
+      group: oinstall
+    # when: _acfs_mkfs.rc == 0
+
+  - name: Srvctl add filesystem 
+    become_user: root
+    shell: >
+      {{ grid_config.homePath }}/bin/srvctl 
+      add filesystem 
+      -device {{ _asm_vol_info.stdout | regex_search('Volume Device: .*') | split(': ') | last }} 
+      -volume {{ asm.volume.name }} 
+      -diskgroup {{ asm.diskgroup.data }} 
+      -path {{ asm.volume.mountpath }} 
+      -mountowner oracle 
+      -mountgroup oinstall 
+      -mountperm 755
+    when: 
+      - grid_config.master_node in ansible_hostname
+      - _acfs_mkfs.changed
+    register: _srvctl_add_filesystem
+    failed_when:
+      - _srvctl_add_filesystem.rc != 0
+      - "'PRCA-1112' not in _srvctl_add_filesystem.stdout"
+      # 'PRCA-1112 : Mount point path /mnt/hub_acfs1 is in use by another file system resource on node huba1'
+
+  - name: Srvctl start filesystem 
+    shell: >
+      {{ grid_config.homePath }}/bin/srvctl 
+      start filesystem 
+      -volume {{ asm.volume.name }} 
+      -diskgroup {{ asm.diskgroup.data }}
+    register: _srvctl_start_filesystem
+    failed_when:
+      - _srvctl_start_filesystem.rc != 0
+      - "'PRCR-1120' not in _srvctl_start_filesystem.stdout"
+      # PRCR-1120 : Resources are already running.
+
+  - name: Gather server mounts facts 
+    ansible.builtin.setup:
+      gather_subset:
+        # - "!all"
+        - "mounts" 
+
+- name: DBaaS ACFS configure
+  become: true
+  when: 
+    - dbaas_acfs | default(false)
+    - ansible_mounts | selectattr ('mount', 'equalto', asm.volume.mountpath )
+  block:
+
+  - name: Find asm.volume.mountpath file 
+    stat:
+      path: "{{ asm.volume.mountpath }}"
+    register: asm_volume_mountpath_stat
+
+  - name: Create dbaas_acfs directory
+    file:
+      path: "{{ asm.volume.mountpath }}/dbaas_acfs"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    when: asm_volume_mountpath_stat.stat.exists
+    register: create_dbaas_acfs_directory
+
+  - name: Create dbaas_acfs link 
+    file:
+      src: "{{ asm.volume.mountpath }}/dbaas_acfs"
+      dest: /var/opt/oracle/dbaas_acfs 
+      state: link
+      owner: root 
+      group: root 
+    when: create_dbaas_acfs_directory is success
+
+... 

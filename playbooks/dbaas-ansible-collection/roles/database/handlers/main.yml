@@ -1,0 +1,10 @@
+#SPDX-License-Identifier: MIT-0
+---
+# handlers file for dbaas
+
+- name: Spool dbaascli_command_output_prereqs 
+  debug:
+    msg: "{{ dbaascli_command_output_prereqs.stdout }}"
+
+- name: End execution
+  meta: end_play

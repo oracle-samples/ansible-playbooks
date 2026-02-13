@@ -1,0 +1,87 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: database dbhome
+  become: true
+  when: oracle_facts.system
+  block:
+
+  - name: database dbhome delete 
+    ansible.builtin.include_tasks: delete/main.yml
+    tags: dbhome_delete
+
+  - name: database dbhome create 
+    ansible.builtin.include_tasks: create/main.yml
+    tags: dbhome_create,database_create
+    
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+# - name: DBaaSCLI Database Home Block 
+#   become: true
+#   when: 
+#     - oracle_facts.system.dbaascli_on
+#   block:
+
+#   - name: DBaaSCLI dbHome create 
+#     include_tasks:
+#       file: dbaascli/create.yml 
+#       apply:
+#         tags: 
+#           - dbhome_create
+#           - database_create
+#           - database_move 
+#     with_items: "{{ db_name_list }}"
+#     loop_control:
+#       loop_var: db_name 
+#     tags: 
+#       - dbhome_create
+#       - database_create
+#       - database_move 
+
+#   - name: DBaaSCLI dbHome delete 
+#     include_tasks:
+#       file: dbaascli/delete.yml 
+#       apply:
+#         tags: 
+#           - dbhome_delete
+#     with_items: "{{ db_name_list }}"
+#     loop_control:
+#       loop_var: db_name 
+#     tags: 
+#       - dbhome_delete 
+
+# - name: DBaaSCA Database Home Block 
+#   become: true
+#   when: 
+#     - not oracle_facts.system.dbaascli_on
+#   block:
+
+#   - name: DBaaSCA dbHome create 
+#     include_tasks:
+#       file: dbaasca/create.yml 
+#       apply:
+#         tags: 
+#           - dbhome_create
+#           - database_create
+#           - database_move 
+#     with_items: "{{ db_name_list }}"
+#     loop_control:
+#       loop_var: db_name 
+#     tags: 
+#       - dbhome_create
+#       - database_create
+#       - database_move 
+
+...

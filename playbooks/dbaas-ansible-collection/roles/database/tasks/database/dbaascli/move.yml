@@ -1,0 +1,107 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI database move
+  become: True
+  ignore_errors: True
+  when: 
+    - oracleHomeName is defined
+    - database_config.db_role is defined
+    - ansible_hostname in database_config.master_node
+  block:
+
+  - name: Run DBaaSCLI database move prereqs
+    command: >
+      dbaascli database move 
+      --db_name {{ db_name }} 
+      --oracleHomeName {{ oracleHomeName }} 
+      --prereqs
+    register: dbaascli_database_move_prereqs
+    failed_when: "'dbaascli execution completed' not in dbaascli_database_move_prereqs.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Run DBaaSCLI database move prereqs 
+        -----------------
+        {{ dbaascli_database_move_prereqs.stdout_lines | to_nice_yaml }}
+        ==================================================
+    when: dbaascli_database_move_prereqs is failed
+
+  - name: Run DBaaSCLI database move standby
+    command: >
+      dbaascli database move
+      --db_name {{ db_name }}
+      --oracleHomeName {{ oracleHomeName }}
+    register: dbaascli_database_move_standby
+    when:
+      - dbaascli_database_move_prereqs is success
+      - database_config.db_role == 'standby'
+      - "'dbaascli execution completed' in dbaascli_database_move_prereqs.stdout"
+      - "'prereqs' not in ansible_run_tags|lower"
+    failed_when: "'dbaascli execution completed' not in dbaascli_database_move_standby.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Run DBaaSCLI database move standby 
+        -----------------
+        {{ dbaascli_database_move_standby.stdout_lines | to_nice_yaml }}
+        ==================================================
+    when: dbaascli_database_move_standby is failed
+
+  - name: Run DBaaSCLI database move primary
+    command: >
+      dbaascli database move
+      --db_name {{ db_name }}
+      --oracleHomeName {{ oracleHomeName }}
+    register: dbaascli_database_move_primary
+    when:
+      - dbaascli_database_move_prereqs is success
+      - "'dbaascli execution completed' in dbaascli_database_move_prereqs.stdout"
+      - database_config.db_role == 'primary'
+      - ((dbaascli_database_move_standby is skipped) or 
+        ('dbaascli execution completed' in dbaascli_database_move_standby.stdout))
+      - "'prereqs' not in ansible_run_tags|lower"
+    failed_when: "'dbaascli execution completed' not in dbaascli_database_move_primary.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Run DBaaSCLI database move primary
+        -----------------
+        {{ dbaascli_database_move_primary.stdout_lines | to_nice_yaml }}
+        -----------------
+        {{ dbaascli_database_move_primary.cmd }} --rollback --sessionID {{ dbaascli_database_move_primary.stdout_lines | regex_findall('Session ID of the current execution is: (.*)') | first }}
+        ==================================================
+    when: dbaascli_database_move_primary is failed
+
+  # - set_fact:
+  #     dbaastools_log: "{{ dbaascli_database_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"
+  #   when: 
+  #     - "'dbaascli execution completed' in dbaascli_database_move_primary.stdout"
+
+  - name: Analyze DBaaSCLI log
+    include_tasks: log_analyze.yml
+    vars:
+      dbaastools_log: "{{ dbaascli_database_move_primary.stdout | regex_search('Session log: (.+)' , '\\1') | first }}"  
+    when: 
+      - dbaascli_database_move_primary is success
+      - "'dbaascli execution completed' in dbaascli_database_move_primary.stdout"
+
+

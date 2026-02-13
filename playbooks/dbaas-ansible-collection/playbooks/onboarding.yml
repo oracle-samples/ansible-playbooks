@@ -1,0 +1,172 @@
+---
+#
+# Oracle DBaaS Onboarding 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+#
+# This playbook uses the following additional variables which should be configured at run time for the template:
+# db_name: oradb1,oradb2,oradb<N> 
+# db_sys_password: <sys_password> 
+
+- hosts: all 
+  gather_facts: true
+  vars_prompt:
+    - name: database_list 
+      prompt: Oracle - Enter the list of databases (comma separated)
+      private: false 
+    - name: ansible_environment_name 
+      prompt: Ansible - Enter the Ansible environment name
+      private: false 
+    - name: ansible_remote_user_target 
+      prompt: Ansible - Sets the login user for the target machines
+      default: opc
+      private: false 
+    - name: ansible_python_interpreter_target 
+      prompt: Ansible - Sets the ansible_python_interpreter for the target machines
+      default: /opt/oracle.ahf/common/venv/bin/python
+      private: false 
+    - name: ansible_inventory_dir 
+      prompt: Ansible - Enter the Ansible inventory full path directory
+      default: "{{ lookup('ansible.builtin.env', 'PWD') }}/inventory"
+      private: false 
+    - name: vault_secret
+      prompt: Password - Enter the password for Ansible Vault ([8=>length<=30][A-Z][a-z][0-9])
+      # default: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'ascii_uppercase', 'digits'], length=10) }}"
+      private: true 
+      confirm: true
+    - name: db_sys_password
+      prompt: Password - Enter the password for user SYS ([8=>length<=30][A-Z][a-z][0-9][-!@%&*.#])
+      # default: "{{ vault_gg_deployment_password | default(lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'ascii_uppercase', 'digits', '[-!@%&*.#]'], length=20)) }}G*1w"
+      private: true 
+      unsafe: true 
+      confirm: true
+
+  tasks:
+
+  - name: Vault config 
+    delegate_to: localhost
+    run_once: true
+    block:
+
+    - name: Include only files matching dbservers.yml
+      ansible.builtin.include_vars:
+        dir: group_vars 
+        files_matching: dbservers.yml
+
+    - name: Assert Ansible Vault password 
+      ansible.builtin.assert:
+        that: 
+          - vault_secret | length >= 8  
+          - vault_secret | length <= 30  
+          - vault_secret | regex_search('[0-9]')
+          - vault_secret | regex_search('[a-z]')
+          - vault_secret | regex_search('[A-Z]')
+        fail_msg:
+          - "Ansible Vault password is not strong."
+          - "The strong password policy has the following requirements:"
+          - "   * At least one lowercase character [a...z]"
+          - "   * At least one upposercase character [A...Z]"
+          - "   * At least one digit [0...9]"
+          - "   * The length should be between 8 and 30 characters."
+        success_msg: "GoldenGate deployment password accepted"
+
+    - name: Assert SYS password
+      ansible.builtin.assert:
+        that: 
+          - db_sys_password | length >= 8
+          - db_sys_password | length <= 30 
+          - db_sys_password | regex_search('[0-9]')
+          - db_sys_password | regex_search('[a-z]')
+          - db_sys_password | regex_search('[A-Z]')
+          - db_sys_password | select('search', regex)
+        fail_msg:
+          - "Oracle database SYS password is not strong."
+          - "The strong password policy has the following requirements:"
+          - "   * At least one lowercase character [a...z]"
+          - "   * At least one upposercase character [A...Z]"
+          - "   * At least one digit [0...9]"
+          - "   * At least one special character [- ! @ % & * . #]"
+          - "   * The length should be between 8 and 30 characters."
+        success_msg: "Oracle SYS password accepted"
+      vars:
+        PATTERNS:
+          - '\-'
+          - '\!'
+          - '\@'
+          - '\%'
+          - '\&'
+          - '\*'
+          - '\.'
+          - '\#'
+          - '\_'
+        regex: "{{ PATTERNS | join('|') }}"
+
+    - name: Create inventory directory
+      file:
+        path: "{{ ansible_inventory_dir }}" 
+        state: directory
+
+    - name: Create inventory file
+      copy:
+        dest: "{{ ansible_inventory_dir }}/{{ ansible_environment_name }}.yml"
+        content: |
+          dbservers:
+            children:  
+              siteA:
+                hosts:
+                  hostA1:
+                    ansible_host: <FQDN>
+                  hostA2:
+                    ansible_host: <FQDN>
+                vars:
+                  ansible_python_interpreter: {{ ansible_python_interpreter_target }} 
+                  ansible_remote_user: {{ ansible_remote_user_target }}
+              siteB:
+                hosts:
+                  hostB1:
+                    ansible_host: <FQDN>
+                  hostB2:
+                    ansible_host: <FQDN>
+                vars:
+                  ansible_python_interpreter: {{ ansible_python_interpreter_target }} 
+                  ansible_remote_user: {{ ansible_remote_user_target }}
+            vars:
+              database_list: "{{ database_list }}"
+
+    - name: Create vault_pass file 
+      ansible.builtin.copy:
+        dest: "{{ ansible_inventory_dir }}/vault_pass"
+        backup: true
+        mode: u=rwx,g=,o=
+        content: |
+          #!/usr/bin/env python3
+          import os
+          print(os.environ['VAULT_PASSWORD'])
+
+    - name: Create sensitive data file 
+      ansible.builtin.copy:
+        dest: "{{ ansible_inventory_dir }}/{{ ansible_environment_name }}.key"
+        backup: true
+        mode: u=rw,g=,o=
+        content: |
+          db_sys_password: "{{ db_sys_password }}"
+          vault_secret: {{ vault_secret }}
+      when: 
+        - db_sys_password | length > 0
+        - vault_secret | length > 0
+      register: sensitive_data_file
+
+    - name: Vault encrypt sensitive data file 
+      expect:
+        command: "ansible-vault encrypt {{ ansible_inventory_dir }}/{{ ansible_environment_name }}.key --ask-vault-password"
+        responses:
+          New Vault password: "{{ vault_secret }}"
+          Confirm New Vault password: "{{ vault_secret }}"
+      when: sensitive_data_file is success
+

@@ -1,0 +1,25 @@
+sql_flashback_on: "alter database flashback on;"
+sql_flashback_off: "alter database flashback off;"
+sql_force_logging: "alter database force logging;"
+sql_db_parameters: |
+  select name,value
+  from v$parameter
+  where name in ( 'cluster_database_instances',
+                  'instance_name',
+                  'db_domain',
+                  'db_name',
+                  'db_unique_name',
+                  'processes',
+                  'pga_aggregate_target',
+                  'sga_target',
+                  'db_recovery_file_dest_size',
+                  'wallet_root'
+                );
+sql_db_options: |
+  select  open_mode,
+          flashback_on,
+          database_role,
+          DATAGUARD_BROKER,
+          GUARD_STATUS,
+          FORCE_LOGGING 
+  from v$database;

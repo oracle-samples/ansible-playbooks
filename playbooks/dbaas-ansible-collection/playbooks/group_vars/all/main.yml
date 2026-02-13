@@ -1,0 +1,64 @@
+---
+# Swingbench user
+swingbench_user: opc 
+swingbench_group: opc 
+jdk:
+  url: "https://download.oracle.com/java/24/latest/jdk-24_linux-x64_bin.tar.gz"
+  checksum: "sha256:f04a4421519b9719ac96078e16af1ff0bbbfdbda7481b8ad573d75b5b6cd50b1"
+  home: "{{ stage_dir.managed.app }}/{{ swingbench_version | default(hostvars['localhost']['swingbench_version']) | default() }}/jdk"
+
+swingbench:
+  owner: "{{ swingbench_user }}" 
+  group: "{{ swingbench_group }}" 
+  base: "{{ stage_dir.managed.app }}/{{ swingbench_version | default(hostvars['localhost']['swingbench_version']) | default() }}" 
+  home: "{{ stage_dir.managed.app }}/{{ swingbench_version | default(hostvars['localhost']['swingbench_version']) | default() }}/swingbench"
+  scale: 2
+  number_pdbs: "{{ number_pdbs | default(1) }}" 
+  xml_file_rw: "{{ swingbench_xml_file_rw | default('swingbench_oltpmix_template.xml') }}"
+  xml_file_ro: "{{ swingbench_xml_file_ro | default('swingbench_oltpmixro_template.xml') }}"
+  NumberOfUsers: "{{ swingbench_NumberOfUsers | default(10) | int }}"
+  PooledMaxLimit: "{{ swingbench_PooledMaxLimit | default(10 * 2 ) }}"
+  delay: "{{ swingbench_delay | default(10) }}"
+  inter_delay: "{{ swingbench_inter_delay | default(10) }}"
+  soe_password_enc: "{{ db_sys_password }}"
+  server: "{{ groups['sbservers'][0] }}"
+  connection_pooling: "{{ swingbench_connection_pooling | default(true) }}"
+
+# Ansible
+main_html: "{{ ansible_base }}/logs/{{ ansible_limit }}/main.html"
+sysdate: "{{ '%Y-%m-%dT%H:%M:%S%z' | strftime( now(utc=false).strftime('%s') ) }}"
+use_case: test
+time_stamp_start: "{{ ansible_date_time.epoch | int }}"
+swingbench_server: "{{ groups['sbservers'][0] }}"
+silent: false
+minimum_distribution_major_version: 8
+force_facts_timestamp: 86400 # epoch 86400 = 1 day 
+
+# Runtime
+run_time: 1m
+run_time_sec: "{{ run_time | community.general.to_seconds | int }}"
+stabilizing_pause: 1m
+stabilizing_pause_sec: "{{ stabilizing_pause | community.general.to_seconds | int }}"
+before_task_pause: 1m 
+before_task_pause_sec: "{{ before_task_pause | community.general.to_seconds | int }}"
+inter_task_pause: 1m 
+inter_task_pause_sec: "{{ inter_task_pause | community.general.to_seconds | int }}"
+run_time_total_sec: "{{ run_time_sec|int + stabilizing_pause_sec|int + 60 }}" 
+swingbench_run_time: "{{ '%H:%M' | strftime( run_time_total_sec|int , utc=true ) }}"
+statistics_time_begin: "{{ '%H:%M' | strftime( stabilizing_pause_sec|int , utc=true ) }}"
+statistics_time_ends: "{{ '%H:%M' | strftime( run_time_sec|int + stabilizing_pause_sec|int , utc=true ) }}"
+reiteration: 1
+run_swingbench_rw: "{{ vars[db_name + '_run_swingbench_rw'] }}"  
+run_swingbench_ro: "{{ vars[db_name + '_run_swingbench_ro'] }}"
+
+blackout_yellow_sec: 1 
+blackout_red_sec: 2
+brownout_yellow_sec: 5 
+brownout_red_sec: 10 
+StdDeviation_yellow: 5
+StdDeviation_red: 10
+Kurtosis_yellow: 2500 
+Kurtosis_red: 3000 
+Skewness_yellow: 50 
+Skewness_red: 100
+...

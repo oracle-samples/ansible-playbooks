@@ -1,0 +1,14 @@
+# Oracle Home
+## Oracle
+dbca: "{{ database_config.oracle_home }}/bin/dbca"
+oracle_srvctl: "{{ database_config.oracle_home }}/bin/srvctl"
+oracle_sqlplus: "{{ database_config.oracle_home }}/bin/sqlplus"
+
+# Grid
+grid_srvctl: "{{ grid_config.oracle_home }}/bin/srvctl"
+grid_crsctl: "{{ grid_config.oracle_home }}/bin/srvctl"
+grid_listener: "{{ grid_config.oracle_home }}/bin/lsnrctl"
+
+# DBaaS Tools
+dbaasca: /var/opt/oracle/dbaastools/dbaasca/bin/dbca
+pilot: /opt/oracle/pilot/bin/pilot

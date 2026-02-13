@@ -1,0 +1,121 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCA Block 
+  become: true
+  block:
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote acfs_mount_point 
+    file:
+      path: "{{ acfs_mount_point }}/{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: "{{ db_name_list }}" 
+
+  - name: Run DBaasCA prepareForStandby on primary DB
+    expect:
+      command: >
+        {{ dbaasca }}
+        -silent
+        -prepareForStandby
+        -configureDatabase
+        {% if hostvars['localhost']['primary']['db_type'] == 'rac' %}
+        -sourceDB {{ database_config.db_unique_name }}
+        -dgTNSNamesoraFilePath {{ acfs_mount_point }}/{{ db_name }}
+        {% else %}
+        -sourceDB {{ database_config.instance_name }}
+        -dgTNSNamesoraFilePath {{ database_config.oracle_home }}/network/admin
+        {% endif %}
+        -standbyDBUniqueName {{ hostvars['localhost']['standby']['db_unique_name'] }}
+        -standbyScanName {{ hostvars['localhost']['standby']['scan_ip_addresses'] }}
+        -standbyScanPort {{ hostvars['localhost']['standby']['scan_port'] }}
+        -standbyDBDomain {{ database_config.db_domain }} 
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: prepareForStandby 
+    # no_log: true
+    # failed_when: "'Successfully created blob file' not in prepareForStandby.stdout"
+    become_user: oracle 
+    become_flags: "--login"
+    vars:
+      ansible_shell_allow_world_readable_temp: true
+    environment: "{{ oracle_env }}"
+    ignore_errors: true
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA prepareForStandby
+        -----------------
+        {{ prepareForStandby.cmd }}
+        -----------------
+        {{ prepareForStandby.stdout }} 
+        ==================================================
+    when: prepareForStandby is not skipped
+
+  - shell: >
+      grep SEVERE `ls -t {{ oracle_facts.system.inventory_loc | dirname }}/oracle/cfgtoollogs/dbca/trace.log_* | head -n1`
+    register: prepareForStandby_error
+    when: prepareForStandby.failed 
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA prepareForStandby_error
+        -----------------
+        {{ prepareForStandby_error.stdout_lines }}
+        ==================================================
+    when: prepareForStandby.failed 
+    failed_when: prepareForStandby.failed 
+
+  # - name: Find prepareForStandby files 
+  #   find:
+  #     paths: "{{ stage_dir.managed.tmp }}" 
+  #     patterns: "{{ db_name }}_prepareForStandby.tar" 
+  #   register: prepareForStandby_files 
+  #   when: "'Successfully created blob file' in prepareForStandby.stdout"
+
+  - name: Set prepareForStandby_files fact
+    delegate_to: localhost
+    delegate_facts: true
+    when: prepareForStandby is success
+    ansible.builtin.set_fact:
+      prepareForStandby_files: "{{ prepareForStandby.stdout_lines | select('search','Successfully created blob file:') | first | split(': ') | last }}"
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ hostvars['localhost']['prepareForStandby_files'] }}"
+      dest: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.zip"
+      flat: yes
+    when: prepareForStandby is success
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

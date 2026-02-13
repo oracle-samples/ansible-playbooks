@@ -1,0 +1,89 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: PILOT Block 
+  become: true
+  block:
+
+  - name: Create remote stage_dir.managed.tmp
+    file:
+      path: "{{ stage_dir.managed.tmp }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote acfs_mount_point 
+    file:
+      path: "{{ acfs_mount_point }}/{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: "{{ db_name_list }}" 
+
+  - name: Run PILOT prepareForStandby on primary DB
+    expect:
+      command: >
+        {{ pilot }}
+        -silent 
+        -plugin prepare_db_for_standby_cloud 
+        db_name="{{ db_name }}" 
+        AGENT_DB_ID="00229ef0-d3da-4082-8ef0-d49768cac803" 
+        DBAASAPI_JOB_ID="jobid-{{ lookup('ansible.builtin.password', '/dev/null', chars=['digits'], length=5) }}" 
+        EXECUTE_PREREQS="{% if 'prereqs' in ansible_run_tags %}true{% else %}false{% endif %}" 
+        IGNORE_PREREQ_FAILURE="false" 
+        SKIP_PREREQS="false" 
+        STANDBY_DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}" 
+        STANDBY_DB_DOMAIN="{{ hostvars['localhost']['standby']['DBDomain'] }}"
+        STANDBY_SERVICE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}.{{ hostvars['localhost']['standby']['DBDomain'] }}" 
+        STANDBY_SCAN_NAME="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['standby']['ScanName'] }}{% else %}{{ hostvars['localhost']['standby']['HostIPAddress'] }}{% endif %}" 
+        STANDBY_SCAN_PORT="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['standby']['ScanPort'] }}{% else %}{{ hostvars['localhost']['standby']['HostPort'] }}{% endif %}" 
+        PRIMARY_SCAN_NAME="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['primary']['ScanName'] }}{% else %}{{ hostvars['localhost']['primary']['HostIPAddress'] }}{% endif %}" 
+        PRIMARY_SCAN_PORT="{% if database_facts[db_name].dbType == 'rac' %}{{ hostvars['localhost']['primary']['ScanPort'] }}{% else %}{{ hostvars['localhost']['primary']['HostPort'] }}{% endif %}" 
+        Validate_rpms_consistency="false"
+        Validate_SCAN_name_in_tnsnames_ora_file="false"
+        -logDir /var/opt/oracle/log/{{ db_name }}/dataguard/prepareForStandby
+        -checkpointDir {{ database_config.basePath }}/cfgtoollogs/dbca/checkpoints/oracle/prepare_for_standby
+      responses:
+        (?i)password: "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: pilot_prepareForStandby
+    ignore_errors: true
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        PILOT prepareForStandby
+        -----------------
+        {{ pilot_prepareForStandby.cmd }}
+        -----------------
+        {{ pilot_prepareForStandby.stdout }} 
+        ==================================================
+    when: pilot_prepareForStandby is not skipped
+    failed_when: pilot_prepareForStandby.failed 
+
+  - name: Fetch prepareForStandby files
+    ansible.builtin.fetch:
+      src: "{{ pilot_prepareForStandby.stdout_lines | regex_findall(' the file (.+) needs to be copied') | first }}"
+      dest: "{{ stage_dir.control.tmp }}/prepareForStandby_{{ db_name }}.{{ pilot_prepareForStandby.stdout_lines | regex_findall(' the file (.+) needs to be copied') | first | split('.') | last }}"
+      flat: yes
+    when: pilot_prepareForStandby.rc == 0 
+    
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

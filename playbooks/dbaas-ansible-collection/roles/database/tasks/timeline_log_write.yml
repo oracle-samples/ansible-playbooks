@@ -1,0 +1,22 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Timeline write log 
+  lineinfile:
+    insertafter: EOF
+    dest: "{{ work_dir }}/run_timeline.csv"
+    line: "{{ sysdate }},Framework,{{ dbUniqueName }},{{ timeline_task_name }},{{ status }}"
+  delegate_to: localhost
+  become: false
+  when: "'framework' in ansible_run_tags"
+  ignore_errors: true
+

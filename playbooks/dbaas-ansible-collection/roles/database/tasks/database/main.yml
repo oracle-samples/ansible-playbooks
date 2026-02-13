@@ -1,0 +1,43 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: database 
+  become: true
+  when: oracle_facts.system
+  block:
+
+  - name: database delete
+    include_tasks:
+      file: delete/main.yml 
+      apply:
+        tags: database_delete
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: database_delete 
+
+  - name: database create 
+    include_tasks:
+      file: create/main.yml 
+      apply:
+        tags: database_create
+    with_items: "{{ db_name_list }}"
+    loop_control:
+      loop_var: db_name 
+    tags: database_create 
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

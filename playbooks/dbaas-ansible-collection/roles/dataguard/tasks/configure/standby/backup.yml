@@ -1,0 +1,483 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaasCA configureStandby Block
+  become: true
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  throttle: 1
+  when: 
+    - "'pilot' not in ansible_run_tags"
+    - database_config.db_role is not defined
+    - ansible_hostname in hostname_target
+    - not oracle_facts.system.dbaascli
+    - hostvars['localhost']['primary'] is defined
+    - hostvars['localhost']['standby'] is defined
+  block:
+
+  - name: Create remote stage_dir.managed.workdir
+    file:
+      path: "{{ stage_dir.managed.workdir }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote shared_dir 
+    file:
+      path: "{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: 
+      - "{{ acfs_mount_point }}/{{ db_name }}"
+      - "{{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['DBUniqueName'] }}"
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      src: "/tmp/{{ hostvars['localhost']['prepareForStandby_files'] | basename }}" 
+      dest: "{{ stage_dir.managed.workdir }}/" 
+      owner: oracle 
+      group: oinstall 
+      mode: 0644
+    register: copy_prepareForStandby_blob_file
+
+  - name: Run DBaasCA configureStandby 
+    expect:
+      command: >
+        {{ dbaasca }} 
+        -silent
+        -createDuplicateDB
+        -createAsStandby
+        -configureStandby
+        -useActiveDatabaseDuplication false
+        -useOMF true
+        -adminManaged
+        {% if hostvars['localhost']['primary']['dbType'] == 'rac' %}-standbyScanName{% else %}-standbyHostName{% endif %} {{ grid_config.scan_ips }}
+        {% if hostvars['localhost']['primary']['dbType'] == 'rac' %}-standbyScanPort{% else %}-standbyListenerPort{% endif %} {{ grid_config.scanListenerTCPPorts }}
+        -gdb_name {{ db_name }}
+        -sid {{ db_name }}
+        -remoteDBConnString {{ hostvars['localhost']['primary']['ScanIPAddresses'] | split(',') | first }}:{{ hostvars['localhost']['primary']['HostPort'] }}/{{ hostvars['localhost']['primary']['DBUniqueName'] }}.{{ hostvars['localhost']['primary']['DBDomain'] }}
+        -nodelist {{ grid_config.cluster_nodes }}
+        -dgProtectionMode MAX_PERFORMANCE
+        -standbyTransportMode ASYNC
+        -configureActiveDG
+        -usedb_nameInPDBAlias
+        -standbyBlobFileLocFromPrimaryDB {{ copy_prepareForStandby_blob_file.dest }}
+        -dgTNSNamesoraFilePath {{ acfs_mount_point }}/{{ db_name }}/tnsnames.ora
+        -storageType ASM
+        -datafileDestination +{{ asm.diskgroup.data }}
+        -recoveryAreaDestination +{{ asm.diskgroup.reco }}
+        -recoveryAreaSize {{ hostvars['localhost']['primary']['db_recovery_file_dest_size'] | int | human_readable(unit='M') | split('.') | first }}
+        -initParams 'db_create_online_log_dest_1=+{{ asm.diskgroup.data }},os_authent_prefix="",processes={{ hostvars['localhost']['primary']['processes'] }},db_name={{ db_name }},pga_aggregate_target={{ hostvars['localhost']['primary']['pga_aggregate_target'] }},sga_target={{ hostvars['localhost']['primary']['sga_target'] }},db_domain={{ hostvars['localhost']['standby']['DBDomain'] }},db_unique_name={% if hostvars['localhost']['primary']['dbType'] %}{{ hostvars['localhost']['standby']['DBUniqueName'] }}{% else %}{{ hostvars['localhost']['standby']['instanceName'] }}{% endif %},inmemory_force=cellmemory_level'
+        -databaseConfigType {{ hostvars['localhost']['primary']['dbType'] }}
+        -honorNodeNumberToThread
+        -honorNodeNumberForInstance
+        -enableArchive true
+        -configureTDE true
+        -tdeWalletRoot {{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        -primaryDBTdeWallet {{ hostvars['localhost']['primary']['walletLocation'] }}
+        -skipPasswordComplexityCheck true
+        -J-Dapplication.exceptions.severity=DBT-06012:WARNING,DBT-06604:WARNING,DBT-16008:WARNING
+        -J-Doracle.assistants.dbca.useStandardLogLocation=true
+        -jreLoc /usr/java/jdk-11
+      responses:
+        (?i)password: "{{ db_sys_password }}"
+      timeout: 3600 
+    become_user: oracle 
+    register: dbca_configureStandby 
+    when: 
+      - ansible_hostname in grid_config.master_node
+    failed_when: 
+      - "'Running Recover_managed_standby job' not in dbca_configureStandby.stdout"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCA configureStandby 
+        -----------------
+        {{ dbca_configureStandby.cmd }} 
+        -----------------
+        {{ dbca_configureStandby.stdout }} 
+        ==================================================
+
+  - name: Delete remote stage_dir.managed.workdir 
+    file:
+      path: "{{ stage_dir.managed.workdir }}"  
+      state: absent
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+- name: PILOT configureStandby Block
+  become: true
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  throttle: 1
+  when: 
+    - "'pilot' in ansible_run_tags"
+    - database_config.db_role is not defined
+    - hostname_target is defined
+    - ansible_hostname in hostname_target
+    - not oracle_facts.system.dbaascli
+    - hostvars['localhost']['primary'] is defined
+    - hostvars['localhost']['standby'] is defined
+  block:
+
+  - name: Create remote stage_dir.managed.workdir
+    file:
+      path: "{{ stage_dir.managed.workdir }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+
+  - name: Create remote shared_dir 
+    file:
+      path: "{{ item }}" 
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: 
+      - "{{ acfs_mount_point }}/{{ db_name }}"
+      - "{{ acfs_mount_point }}/wallets/{{ hostvars['localhost']['standby']['DBUniqueName'] }}"
+      - /var/opt/oracle/log/reg_tmp_files
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      src: "/tmp/{{ hostvars['localhost']['prepareForStandby_files'] | basename }}" 
+      dest: /var/opt/oracle/log/reg_tmp_files 
+      owner: oracle 
+      group: oinstall 
+      mode: 0644
+    register: copy_prepareForStandby_blob_file
+
+  - name: Run PILOT configure_standby_db_cloud 
+    expect:
+      command: >
+        {{ pilot }}
+        -silent 
+        -plugin configure_standby_db_cloud 
+        DB_NAME="{{ db_name }}" 
+        ORACLE_HOME="{{ oracleHomePath }}"
+        DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}"
+        AGENT_DB_ID="00229ef0-d3da-4082-8ef0-d49768cac803" 
+        DBAASAPI_JOB_ID="jobid-{{ lookup('ansible.builtin.password', '/dev/null', chars=['digits'], length=5) }}" 
+        EXECUTE_PREREQS="{% if 'prereqs' in ansible_run_tags %}true{% else %}false{% endif %}" 
+        IGNORE_PREREQ_FAILURE="false" 
+        SKIP_PREREQS="false" 
+        STANDBY_DB_UNIQUE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}" 
+        STANDBY_DB_DOMAIN="{{ hostvars['localhost']['standby']['DBDomain'] }}"
+        STANDBY_SERVICE_NAME="{{ hostvars['localhost']['standby']['DBUniqueName'] }}.{{ hostvars['localhost']['standby']['DBDomain'] }}" 
+        STANDBY_SCAN_NAME="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['standby']['ScanName'] }}{% else %}{{ hostvars['localhost']['standby']['HostIPAddress'] }}{% endif %}" 
+        STANDBY_SCAN_PORT="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['standby']['ScanPort'] }}{% else %}{{ hostvars['localhost']['standby']['HostPort'] }}{% endif %}" 
+        PRIMARY_SERVICE_NAME="{{ hostvars['localhost']['primary']['DBUniqueName'] }}.{{ hostvars['localhost']['primary']['DBDomain'] }}" 
+        PRIMARY_SCAN_NAME="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['primary']['ScanName'] }}{% else %}{{ hostvars['localhost']['primary']['HostIPAddress'] }}{% endif %}" 
+        PRIMARY_SCAN_PORT="{% if hostvars['localhost']['primary']['dbType'] == 'rac' %}{{ hostvars['localhost']['primary']['ScanPort'] }}{% else %}{{ hostvars['localhost']['primary']['HostPort'] }}{% endif %}" 
+        NODE_LIST="{{ grid_config.cluster_nodes }}"
+        PROTECTION_MODE="MAX_PERFORMANCE"
+        TRANSPORT_TYPE="ASYNC"
+        ACTIVE_DG="TRUE"
+        STANDBY_DB_INFO_JSON="/var/opt/oracle/log/reg_tmp_files/{{ hostvars['localhost']['prepareForStandby_files'] | basename }}"
+        SGA_SIZE_IN_MB="{{ sga_size_in_mb | default(hostvars['localhost']['primary']['sga_target'] | int | human_readable(unit='M') | split('.') | first) }}"
+        PGA_SIZE_IN_MB="{{ pga_size_in_mb | default(hostvars['localhost']['primary']['pga_aggregate_target'] | int | human_readable(unit='M') | split('.') | first) }}"
+        DATAFILE_DESTINATION="{{ asm.diskgroup.data }}"
+        FRA_DESTINATION="{{ asm.diskgroup.reco }}"
+        REDO_LOG_DESTINATION="{{ asm.diskgroup.data }}"
+        FRA_SIZE_IN_MB="{{ hostvars['localhost']['primary']['db_recovery_file_dest_size'] | int | human_readable(unit='M') | split('.') | first }}"
+        -logDir /var/opt/oracle/log/{{ db_name }}/dataguard/prepareForStandby
+        -checkpointDir {{ oracleHomePath | dirname | dirname | dirname }}/cfgtoollogs/dbca/checkpoints/oracle/prepare_for_standby
+      responses:
+        (?i)password: "{{ db_sys_password }}"
+      timeout: 3600 
+    register: pilot_configure_standby_db_cloud 
+    when: 
+      - ansible_hostname in grid_config.master_node
+    # failed_when: 
+    #   - "'Running Recover_managed_standby job' not in dbca_configureStandby.stdout"
+
+  - debug: var=pilot_configure_standby_db_cloud
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') | default('Database not found') }}" 
+    vars:
+      output: | 
+        ==================================================
+        PILOT pilot_configure_standby_db_cloud 
+        -----------------
+        {{ pilot_configure_standby_db_cloud.cmd }} 
+        -----------------
+        {{ pilot_configure_standby_db_cloud.stdout }} 
+        ==================================================
+
+  - name: Delete remote stage_dir.managed.workdir 
+    file:
+      path: "{{ stage_dir.managed.workdir }}"  
+      state: absent
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+- name: DBaasCLI configureStandby prereqs Block
+  become: true
+  throttle: 1
+  when: 
+    - database_config.db_role is not defined
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+    - system_config.dbaascli_on is true
+    - "'prereqs' in ansible_run_tags"
+  block:
+
+  - name: Timeline - DBaasCLI_configureStandby_prereqs
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - dbaascli is true
+    ignore_errors: true
+    vars:
+      status: "running"
+      task_name: "DBaasCLI_configureStandby_prereqs"
+
+  - name: Create remote reg_tmp_files 
+    file:
+      path: /var/opt/oracle/log/reg_tmp_files
+      state: directory
+      mode: '0750'
+      owner: oracle 
+      group: oinstall
+
+  - name: Copy prepareForStandby_prereqs_files files 
+    copy: 
+      src: "/tmp/{{ hostvars['localhost']['prepareForStandby_prereqs_files'] }}" 
+      dest: /var/opt/oracle/log/reg_tmp_files 
+      owner: oracle 
+      group: oinstall 
+      mode: 0640
+
+  - name: Run DBaasCLI dataguard configureStandby prereqs
+    expect:
+      command: >
+        dbaascli dataguard configureStandby 
+        --db_name {{ db_name }}
+        --oracleHomeName {{ oracleHomeName }} 
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['ScanIPAddresses'] }}
+        --primaryScanPort {{ hostvars['localhost']['primary']['ScanPort'] }}
+        --primaryServiceName {{ hostvars['localhost']['primary']['DBUniqueName'] }}.{{ hostvars['localhost']['primary']['DBDomain'] }}
+        --protectionMode MAX_PERFORMANCE 
+        --transportType ASYNC 
+        --activeDG true 
+        --standbyScanIPAddresses {{ grid_config.scan_name }}
+        --standbyScanPort {{ grid_config.scanListenerTCPPorts }}
+        --standbyDBInfoJsonLocation /var/opt/oracle/log/reg_tmp_files/{{ hostvars['localhost']['prepareForStandby_prereqs_files'] }}
+        --prereqs 
+      responses:
+        PRIMARY_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        PRIMARY_DB_TDE_PASSWORD: "{{ db_tde_password }}" 
+        AWR_ADMIN_PASSWORD: "{{ awr_admin_password }}" 
+        AWR_ADMIN_PASSWORD (reconfirmation): "{{ awr_admin_password }}" 
+      timeout: 3600 
+    throttle: 1
+    register: configureStandby_prereqs
+    failed_when: 
+      - "'dbaascli execution completed' not in configureStandby_prereqs.stdout"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI configureStandby_prereqs
+        -----------------
+        {{ configureStandby_prereqs.cmd }}
+        -----------------
+        {{ configureStandby_prereqs.stdout }} 
+        ==================================================
+    when: configureStandby_prereqs is not skipped
+
+  - name: Timeline - DBaasCLI_configureStandby_prereqs
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - configureStandby_prereqs is success
+    vars:
+      status: "finished"
+      task_name: "DBaasCLI_configureStandby_prereqs"
+
+  - name: Timeline - DBaasCLI_configureStandby_prereqs
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - configureStandby_prereqs is failed 
+    vars:
+      status: "failed"
+      task_name: "DBaasCLI_configureStandby_prereqs"
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+    
+- name: DBaasCLI configureStandby Block
+  become: true
+  throttle: 1
+  ignore_errors: true
+  when: 
+    - database_config.db_role is not defined
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+    - system_config.dbaascli_on is true
+    - "'prereqs' not in ansible_run_tags"
+  block:
+
+  - name: Timeline - DBaasCLI_configureStandby
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - dbaascli is true
+      - "'prereqs' not in ansible_run_tags"
+    vars:
+      status: "running"
+      task_name: "DBaasCLI_configureStandby"
+
+  - name: Create remote reg_tmp_files 
+    file:
+      path: /var/opt/oracle/log/reg_tmp_files
+      state: directory
+      mode: '0750'
+      owner: oracle 
+      group: oinstall
+
+  - name: Copy prepareForStandby files 
+    copy: 
+      src: "/tmp/{{ hostvars['localhost']['prepareForStandby_files'] }}" 
+      dest: /var/opt/oracle/log/reg_tmp_files 
+      owner: oracle 
+      group: oinstall 
+      mode: 0640
+
+  - name: Run DBaasCLI dataguard configureStandby 
+    expect:
+      command: >
+        dbaascli dataguard configureStandby 
+        --db_name {{ db_name }}
+        --oracleHomeName {{ oracleHomeName }} 
+        --standbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+        --primaryScanIPAddresses {{ hostvars['localhost']['primary']['ScanIPAddresses'] }}
+        --primaryScanPort {{ hostvars['localhost']['primary']['ScanPort'] }}
+        --primaryServiceName {{ hostvars['localhost']['primary']['DBUniqueName'] }}.{{ hostvars['localhost']['primary']['DBDomain'] }}
+        --protectionMode MAX_PERFORMANCE 
+        --transportType ASYNC 
+        --activeDG true 
+        --standbyScanIPAddresses {{ grid_config.scan_name }}
+        --standbyScanPort {{ grid_config.scanListenerTCPPorts }}
+        --standbyDBInfoJsonLocation /var/opt/oracle/log/reg_tmp_files/{{ hostvars['localhost']['prepareForStandby_files'] }}
+      responses:
+        PRIMARY_DB_SYS_PASSWORD: "{{ db_sys_password }}" 
+        PRIMARY_DB_TDE_PASSWORD: "{{ db_tde_password }}" 
+        AWR_ADMIN_PASSWORD: "{{ awr_admin_password }}" 
+        AWR_ADMIN_PASSWORD (reconfirmation): "{{ awr_admin_password }}" 
+      timeout: 14400 
+    throttle: 1
+    register: configureStandby
+    failed_when: 
+      - "'dbaascli execution completed' not in configureStandby.stdout"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,\r]+)') | default() }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI configureStandby
+        -----------------
+        {{ configureStandby.cmd }}
+        -----------------
+        {{ configureStandby.stdout }} 
+        ==================================================
+    when: configureStandby is not skipped
+
+  - name: Run DBaasCLI dataguard switchover prereqs
+    command: >
+      dbaascli dataguard switchover 
+      --db_name {{ db_name }}
+      --targetStandbyDBUniqueName {{ hostvars['localhost']['standby']['DBUniqueName'] }}
+      --prereqs
+    register: dataguard_switchover_prereqs
+    when: configureStandby is success
+    failed_when: 
+      - "'Prerequisite checks completed successfully' not in dataguard_switchover_prereqs.stdout"
+
+  - name: Timeline - DBaasCLI_configureStandby
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - configureStandby is success
+    vars:
+      status: "finished"
+      task_name: "DBaasCLI_configureStandby"
+
+  - name: Timeline - DBaasCLI_configureStandby
+    lineinfile:
+      insertafter: EOF
+      dest: "{{ stage_dir.managed.workdir }}/run_timeline.csv"
+      line: "{{ sysdate }},Framework,{{ db_name }},{{ task_name }},{{ status }}"
+    become: false
+    delegate_to: localhost
+    when: 
+      - "'framework' in ansible_run_tags"
+      - configureStandby is failed
+    vars:
+      status: "failed"
+      task_name: "DBaasCLI_configureStandby"
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

@@ -1,0 +1,112 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCA configure
+  become: true
+  block:
+
+  - name: Create dbaastools directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+      owner: oracle 
+      group: oinstall
+    with_items: 
+      - /var/opt/oracle/dbaastools
+      - /var/opt/oracle/log
+      - /var/opt/oracle/dbaastools/dbaasca
+
+  # - name: Find DBaasCA zip file
+  #   find:
+  #     paths: "{{ stage_dir }}" 
+  #     patterns: "dbaasca.zip" 
+  #   register: dbaasca_zip_files 
+  #   delegate_to: localhost
+  #   run_once: true
+
+  # - name: Get current DBaasCA version
+  #   shell: "{{ oracle_home }}/bin/dbca -version | grep Version"
+  #   register: dbaasca_current_version
+  #   become: true
+  #   become_user: "{{ oracle_user }}" 
+  #   environment:    
+  #     ORACLE_HOME: "{{ oracle_home }}" 
+
+  # - name: Set DBaasCA version fact 
+  #   ansible.builtin.set_fact:
+  #     dbaasca_current_version: "{{ dbaasca_current_version.stdout | split(':') | last }}"
+
+  - name: Copy DBaasCA file 
+    copy: 
+      src: dbaasca.zip
+      dest: "{{ stage_dir.managed.software }}/"
+      owner: oracle 
+      group: oinstall 
+      mode: 0644
+    # when: dbaasca_current_version is version(DBaaSCA_version, '<') 
+    register: copy_dbaasca
+  
+  # - name: Copy DBaaS Tools files 
+  #   copy: 
+  #     src: dcs-agent-29.1.0.0.0_250307.0730-375.x86_64_7325.rpm
+  #     dest: "{{ stage_dir.managed.software }}/"
+  #     owner: oracle 
+  #     group: oinstall 
+  #     mode: 0644
+  #   # when: dbaasca_current_version is version(DBaaSCA_version, '<') 
+  #   register: copy_dcs_agent
+  
+  - name: Unarchive DBaasCA 
+    ansible.builtin.unarchive:
+      src: "{{ stage_dir.managed.software }}/dbaasca.zip"
+      dest: /var/opt/oracle/dbaastools/dbaasca 
+      owner: oracle 
+      group: oinstall
+      remote_src: yes
+    environment:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: '1'
+    become_user: oracle 
+    # when: dbaasca_current_version is version(DBaaSCA_version, '<') 
+    # when: copy_dbaasca.changed 
+
+  # - name: Install dcs-agent rpm 
+  #   command: "rpm -Uvh {{ stage_dir.managed.software }}/dcs-agent-29.1.0.0.0_250307.0730-375.x86_64_7325.rpm --force"
+  #   when: copy_dcs_agent.changed 
+
+  # - name: Restart service initdcsagent
+  #   ansible.builtin.service:
+  #     name: initdcsagent
+  #     state: restarted
+  #   when: copy_dcs_agent.changed 
+
+  # - name: Create dbaasca link 
+  #   file:
+  #     dest: /var/opt/oracle/dbaastools/dbaasca
+  #     src: /opt/oracle/dcs/dbaasca
+  #     state: link
+  #     owner: root 
+  #     group: root 
+
+  # - name: Recursively change ownership of /opt/oracle/dcs/dbaasca
+  #   ansible.builtin.file:
+  #     path: /opt/oracle/dcs/dbaasca
+  #     state: directory
+  #     recurse: yes
+  #     mode: o=rx
+
+  # - name: Change ownership of PILOT
+  #   ansible.builtin.file:
+  #     path: /opt/oracle/pilot/bin/pilot
+  #     mode: o=rx
+
+...

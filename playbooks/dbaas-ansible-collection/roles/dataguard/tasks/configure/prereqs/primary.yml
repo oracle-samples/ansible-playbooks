@@ -1,0 +1,79 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Primary Block 
+  when: 
+    - database_config.db_role 
+    - database_config.db_role == 'primary'
+    - ansible_hostname in database_config.master_node
+  block:
+
+  # - name: Discover database parameters 
+  #   shell: |
+  #     {{ database_config.homePath }}/bin/sqlplus -L -F -SILENT -MARKUP "CSV ON QUOTE OFF DELIMITER :" -nologintime "/ as sysdba" << EOF 
+  #     set heading off
+  #     select name,value
+  #     from v\$parameter
+  #     where name in ('processes','pga_aggregate_target','sga_target','db_recovery_file_dest_size');
+  #     exit
+  #     EOF
+  #   become: true
+  #   become_user: "{{ oracle_user }}" 
+  #   become_flags: "--login"
+  #   vars:
+  #     ansible_shell_allow_world_readable_temp: true
+  #   environment: "{{ oracle_env }}"
+  #   register: _database_parameters
+
+  - name: Set primary facts
+    delegate_to: localhost
+    delegate_facts: true
+    ansible.builtin.set_fact:
+      primary:
+        scan_name:                  "{{ grid_config.scan_name | default(database_config.master_node) }}"
+        scan_ip_addresses:          "{{ grid_config.scan_ips | default(ansible_default_ipv4['address']) }}"
+        scan_port:                  "{{ grid_config.scan_port | default(oracle_facts.system.tnslsnr_port) }}"
+        db_unique_name:             "{{ database_config.db_unique_name }}"
+        instance_name:              "{{ database_config.instance_name }}"
+        db_type:                    "{{ database_config.db_type }}"
+        db_domain:                  "{{ database_config.db_domain }}"
+        pga_aggregate_target:       "{{ database_config.pga_aggregate_target }}"
+        processes:                  "{{ database_config.processes }}"
+        sga_target:                 "{{ database_config.sga_target }}"
+        db_recovery_file_dest_size: "{{ database_config.db_recovery_file_dest_size }}"
+        oracle_home_version:        "{{ database_config.oracle_home_version }}"
+        wallet_root:                "{{ database_config.wallet_root }}"
+
+  - debug:
+      msg: "{{ output | regex_findall('([^\n,]+)') }}" 
+    vars:
+      output: | 
+        ==================================================
+        Primary facts
+        -----------------
+        {{ hostvars['localhost']['primary'] }} 
+        ==================================================
+    when: hostvars['localhost']['primary'] is defined
+
+  - name: Assert that primary facts are defined
+    ansible.builtin.assert:
+      quiet: true
+      that:
+        - hostvars['localhost']['primary'] is defined
+      fail_msg: "Primary facts are NOT defined"
+
+  rescue:
+
+  - name: End execution
+    meta: end_play
+
+...

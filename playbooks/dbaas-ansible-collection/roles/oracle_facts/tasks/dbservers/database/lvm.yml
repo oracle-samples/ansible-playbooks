@@ -1,0 +1,51 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: lvm  
+  become: true
+  become_user: "{{ oracle_user }}" 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  block:
+
+  - name: Find /etc/oratab
+    stat: 
+      path: /etc/oratab
+    register: _oratab_file_found
+
+  - name: Reading /etc/oratab
+    slurp:
+      src: /etc/oratab
+    register: _oratab_file
+    when: _oratab_file_found.stat.exists
+
+  - name: Getting process IDs of SMON 
+    community.general.pids:
+      name: "ora_smon_{{ _oratab_file.content | b64decode | regex_search(db_name+':') | replace(':','') }}"
+    register: smon_running
+
+  - name: Generate oracle_env_lvm
+    set_fact:
+      oracle_env_lvm: |
+        ORACLE_HOME: "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}"
+        PATH: "$PATH:{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1]}}/bin"
+        LD_LIBRARY_PATH: "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}/lib"
+        ORACLE_SID: "{{ _oratab_file.content | b64decode | regex_search(db_name+':') | replace(':','') }}"
+      oracle_home_lvm: "{{ (_oratab_file.content | b64decode | regex_search(db_name+'(.+):') | split(':'))[1] }}" 
+      oracle_sid_lvm: "{{ _oratab_file.content | b64decode | regex_search(db_name+':') | replace(':','') }}" 
+    when: 
+      - _oratab_file_found.stat.exists
+      - _oratab_file.content | length > 0
+      - smon_running.pids | length > 0
+
+...

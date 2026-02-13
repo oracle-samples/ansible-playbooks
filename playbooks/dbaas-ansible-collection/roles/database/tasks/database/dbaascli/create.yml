@@ -1,0 +1,94 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to perform various life-cycle and administration operations on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: DBaaSCLI database create 
+  become: true
+  when: 
+    - oracleHomeName is defined
+    - targetHome is true
+    - database_config.db_role is not defined
+    - ansible_hostname in hostname_target
+    # - ansible_hostname in grid_config.master_node
+  block:
+
+  - name: Run DBaaSCLI database create prereqs
+    expect:
+      command: >
+        dbaascli database create 
+        --db_name {{ db_name }} 
+        --dbUniqueName {{ db_name }}_prim
+        --pdb_name {{ db_name }}p1 
+        --oracleHomeName {{ oracleHomeName }} 
+        --prereqs
+      responses:
+        Enter SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD: "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: dbaascli_database_create_prereqs
+    failed_when: "'dbaascli execution completed' not in dbaascli_database_create_prereqs.stdout"
+
+  # - debug:
+  #     msg: "Log file location: {{ dbaascli_database_create_prereqs.stdout | regex_search('Log file location: .*') }}"
+  #   when: "'dbaascli execution completed' in dbaascli_database_create_prereqs.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI database create prereqs
+        -----------------
+        Log file location: {{ dbaascli_database_create_prereqs.stdout | regex_search('Log file location: .*') }}
+        Status: {{ dbaascli_database_create_prereqs.stdout | regex_search('dbaascli execution .+') }}
+        ==================================================
+    when: dbaascli_database_create_prereqs is not skipped
+    tags: [print_action]
+
+  - name: Run DBaaSCLI database create 
+    expect:
+      command: >
+        dbaascli database create 
+        --db_name {{ db_name }} 
+        --dbUniqueName {{ db_name }}_prim
+        --pdb_name {{ db_name }}p1 
+        --oracleHomeName {{ oracleHomeName }}
+      responses:
+        Enter SYS_PASSWORD: "{{ db_sys_password }}" 
+        Enter SYS_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD: "{{ db_sys_password }}" 
+        Enter TDE_PASSWORD (reconfirmation): "{{ db_sys_password }}" 
+      timeout: 3600 
+    register: dbaascli_database_create
+    when:
+      - "'prereqs' not in ansible_run_tags" 
+      - dbaascli_database_create_prereqs is success
+      - "'dbaascli execution completed' in dbaascli_database_create_prereqs.stdout"
+    failed_when: "'dbaascli execution completed' not in dbaascli_database_create.stdout"
+
+  # - debug:
+  #     msg: "Log file location: {{ dbaascli_database_create.stdout | regex_search('Log file location: .*') }}"
+  #   when: "'dbaascli execution completed' in dbaascli_database_create.stdout"
+
+  - debug:
+      msg: "{{ output | split('\n') }}" 
+    vars:
+      output: | 
+        ==================================================
+        DBaasCLI database create 
+        -----------------
+        Log file location: {{ dbaascli_database_create.stdout | regex_search('Log file location: .*') }}
+        Status: {{ dbaascli_database_create.stdout | regex_search('dbaascli execution .+') }}
+        ==================================================
+    when: dbaascli_database_create is not skipped 
+    tags: [print_action]

@@ -1,0 +1,5 @@
+#SPDX-License-Identifier: MIT-0
+---
+# vars file for oracle_facts
+
+# dbUniqueName: "{{ vars[db_name + '_dbUniqueName'] }}"

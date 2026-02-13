@@ -1,0 +1,24 @@
+---
+#
+# Oracle Database as a Service 
+#
+# Copyright (c) 2022 Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# https://oss.oracle.com/licenses/upl.
+#
+# Description: Playbook to gather Oracle resources on Oracle Exadata Database Service, BaseDB and on-prem. 
+#
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+- name: Execute SQL command 
+  shell: |
+    {{ database_config.homePath }}/bin/sqlplus -L -F -SILENT -nologintime "/ as sysdba" << EOF 
+    {{ sql_command }} 
+    exit
+    EOF
+  become: true
+  become_user: "{{ oracle_user }}" 
+  become_flags: "--login"
+  vars:
+    ansible_shell_allow_world_readable_temp: true
+  environment: "{{ oracle_env }}"

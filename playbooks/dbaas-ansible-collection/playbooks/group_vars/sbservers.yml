@@ -1,0 +1,13 @@
+run_time: 1m
+run_time_sec: "{{ run_time | community.general.to_seconds | int }}"
+stabilizing_pause: 1m
+stabilizing_pause_sec: "{{ stabilizing_pause | community.general.to_seconds | int }}"
+before_task_pause: 1m 
+before_task_pause_sec: "{{ before_task_pause | community.general.to_seconds | int }}"
+inter_task_pause: 1m 
+inter_task_pause_sec: "{{ inter_task_pause | community.general.to_seconds | int }}"
+run_time_total_sec: "{{ run_time_sec|int + stabilizing_pause_sec|int + 60 }}" 
+swingbench_run_time: "{{ '%H:%M' | strftime( run_time_total_sec|int , utc=true ) }}"
+statistics_time_begin: "{{ '%H:%M' | strftime( stabilizing_pause_sec|int , utc=true ) }}"
+statistics_time_ends: "{{ '%H:%M' | strftime( run_time_sec|int + stabilizing_pause_sec|int , utc=true ) }}"
+reiteration: 1
